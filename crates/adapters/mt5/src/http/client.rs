@@ -49,11 +49,23 @@ pub enum HttpClientError {
     #[error("Request error: {0}")]
     RequestError(String),
 
-    #[error("Response error: HTTP {0}: {1}")]
+    #[error("HTTP error: {0} - {1}")]
     HttpError(u16, String),
 
     #[error("Authentication error: {0}")]
     AuthenticationError(String),
+
+    #[error("Authorization error: {0}")]
+    AuthorizationError(String),
+
+    #[error("Rate limit exceeded: {0}")]
+    RateLimitError(String),
+
+    #[error("Invalid request: {0}")]
+    InvalidRequestError(String),
+
+    #[error("Resource not found: {0}")]
+    NotFoundError(String),
 
     #[error("JSON decode error: {0}")]
     JsonDecodeError(String),
@@ -63,15 +75,57 @@ pub enum HttpClientError {
 
     #[error("Server error: {0}")]
     ServerError(String),
+
+    #[error("Timeout error: {0}")]
+    TimeoutError(String),
 }
 
 impl HttpClientError {
+    /// Determines if the error is retryable
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
             HttpClientError::ConnectionError(_)
+                | HttpClientError::RequestError(_)
                 | HttpClientError::ServerError(_)
+                | HttpClientError::TimeoutError(_)
+                | HttpClientError::RateLimitError(_)
         )
+    }
+
+    /// Determines if the error is non-retryable (should fail immediately)
+    pub fn is_non_retryable(&self) -> bool {
+        matches!(
+            self,
+            HttpClientError::AuthenticationError(_)
+                | HttpClientError::AuthorizationError(_)
+                | HttpClientError::InvalidRequestError(_)
+                | HttpClientError::NotFoundError(_)
+                | HttpClientError::JsonDecodeError(_)
+                | HttpClientError::ParseError(_)
+        )
+    }
+
+    /// Determines if the error is fatal (should terminate the connection)
+    pub fn is_fatal(&self) -> bool {
+        matches!(
+            self,
+            HttpClientError::AuthenticationError(_)
+                | HttpClientError::AuthorizationError(_)
+        )
+    }
+
+    /// Maps HTTP status codes to appropriate error variants
+    pub fn from_http_status(status: u16, message: String) -> Self {
+        match status {
+            400 => HttpClientError::InvalidRequestError(message),
+            401 => HttpClientError::AuthenticationError(message),
+            403 => HttpClientError::AuthorizationError(message),
+            404 => HttpClientError::NotFoundError(message),
+            429 => HttpClientError::RateLimitError(message),
+            500..=599 => HttpClientError::ServerError(message),
+            _ => HttpClientError::HttpError(status, message),
+        }
     }
 }
 
@@ -146,7 +200,7 @@ impl Mt5HttpInnerClient {
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(HttpClientError::HttpError(status.as_u16(), error_text));
+            return Err(HttpClientError::from_http_status(status.as_u16(), error_text));
         }
 
         let login_response: Mt5LoginResponse = response
@@ -179,7 +233,7 @@ impl Mt5HttpInnerClient {
                     .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
 
                 if !status.is_success() {
-                    return Err(HttpClientError::HttpError(status.as_u16(), body));
+                    return Err(HttpClientError::from_http_status(status.as_u16(), body));
                 }
 
                 Ok(body)
@@ -207,7 +261,7 @@ impl Mt5HttpInnerClient {
                     .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
 
                 if !status.is_success() {
-                    return Err(HttpClientError::HttpError(status.as_u16(), body_text));
+                    return Err(HttpClientError::from_http_status(status.as_u16(), body_text));
                 }
 
                 Ok(body_text)
@@ -234,7 +288,7 @@ impl Mt5HttpInnerClient {
                     .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
 
                 if !status.is_success() {
-                    return Err(HttpClientError::HttpError(status.as_u16(), body));
+                    return Err(HttpClientError::from_http_status(status.as_u16(), body));
                 }
 
                 Ok(body)
@@ -253,6 +307,11 @@ impl Mt5HttpInnerClient {
 
     pub async fn http_get_symbols(&self) -> Result<String, HttpClientError> {
         let response = self.http_get(&self.url.symbols_url()).await?;
+        Ok(response)
+    }
+
+    pub async fn http_get_symbol_info(&self, symbol: &str) -> Result<String, HttpClientError> {
+        let response = self.http_get(&self.url.symbol_info_url(symbol)).await?;
         Ok(response)
     }
 
@@ -287,6 +346,35 @@ impl Mt5HttpInnerClient {
         Ok(response)
     }
 
+    pub async fn http_get_history(&self, symbol: Option<&str>, from: Option<u64>, to: Option<u64>) -> Result<String, HttpClientError> {
+        let mut url = self.url.history_url();
+        let mut params = Vec::new();
+        
+        if let Some(symbol) = symbol {
+            params.push(format!("symbol={}", symbol));
+        }
+        if let Some(from) = from {
+            params.push(format!("from={}", from));
+        }
+        if let Some(to) = to {
+            params.push(format!("to={}", to));
+        }
+        
+        if !params.is_empty() {
+            url.push('?');
+            url.push_str(&params.join("&"));
+        }
+        
+        let response = self.http_get(&url).await?;
+        Ok(response)
+    }
+
+    pub async fn http_modify_order(&self, order_id: u64, order: &Mt5OrderRequest) -> Result<String, HttpClientError> {
+        let url = self.url.orders_by_id_url(order_id);
+        let response = self.http_post(&url, order).await?;
+        Ok(response)
+    }
+
     // High-level domain methods (no prefix)
     
     pub async fn get_account_info(&self) -> Result<Mt5AccountInfo, HttpClientError> {
@@ -297,6 +385,16 @@ impl Mt5HttpInnerClient {
     pub async fn get_symbols(&self) -> Result<Vec<Mt5Symbol>, HttpClientError> {
         let response = self.http_get_symbols().await?;
         parse_symbols(&response).map_err(|e| HttpClientError::ParseError(e.to_string()))
+    }
+
+    pub async fn get_symbol_info(&self, symbol: &str) -> Result<Mt5Symbol, HttpClientError> {
+        let response = self.http_get_symbol_info(symbol).await?;
+        // For single symbol info, we parse it as a single object rather than array
+        let value: serde_json::Value = serde_json::from_str(&response)
+            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse symbol info: {}", e)))?;
+        
+        // Parse the single symbol object using the same logic as parse_symbols
+        parse_single_symbol(&value).map_err(|e| HttpClientError::ParseError(e.to_string()))
     }
 
     pub async fn get_rates(&self, symbol: &str) -> Result<Vec<Mt5Rate>, HttpClientError> {
@@ -332,6 +430,18 @@ impl Mt5HttpInnerClient {
         let _response = self.http_cancel_order(order_id).await?;
         Ok(())
     }
+
+    pub async fn modify_order(&self, order_id: u64, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
+        let response = self.http_modify_order(order_id, &order).await?;
+        serde_json::from_str::<Mt5OrderResponse>(&response)
+            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse modify order response: {}", e)))
+    }
+
+    pub async fn get_history(&self, symbol: Option<&str>, from: Option<u64>, to: Option<u64>) -> Result<Vec<Mt5Trade>, HttpClientError> {
+        let response = self.http_get_history(symbol, from, to).await?;
+        serde_json::from_str::<Vec<Mt5Trade>>(&response)
+            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse history: {}", e)))
+    }
 }
 
 impl Mt5HttpClient {
@@ -353,6 +463,10 @@ impl Mt5HttpClient {
 
     pub async fn get_symbols(&self) -> Result<Vec<Mt5Symbol>, HttpClientError> {
         self.inner.get_symbols().await
+    }
+
+    pub async fn get_symbol_info(&self, symbol: &str) -> Result<Mt5Symbol, HttpClientError> {
+        self.inner.get_symbol_info(symbol).await
     }
 
     pub async fn get_rates(&self, symbol: &str) -> Result<Vec<Mt5Rate>, HttpClientError> {
@@ -378,6 +492,14 @@ impl Mt5HttpClient {
     pub async fn cancel_order(&self, order_id: u64) -> Result<(), HttpClientError> {
         self.inner.cancel_order(order_id).await
     }
+
+    pub async fn modify_order(&self, order_id: u64, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
+        self.inner.modify_order(order_id, order).await
+    }
+
+    pub async fn get_history(&self, symbol: Option<&str>, from: Option<u64>, to: Option<u64>) -> Result<Vec<Mt5Trade>, HttpClientError> {
+        self.inner.get_history(symbol, from, to).await
+    }
 }
 
 #[cfg(feature = "python-bindings")]
@@ -402,6 +524,38 @@ impl Mt5HttpClient {
     
     async fn py_get_rates(&self, symbol: &str) -> Result<Vec<Mt5Rate>, HttpClientError> {
         self.get_rates(symbol).await
+    }
+    
+    async fn py_get_symbol_info(&self, symbol: &str) -> Result<Mt5Symbol, HttpClientError> {
+        self.get_symbol_info(symbol).await
+    }
+    
+    async fn py_get_positions(&self) -> Result<Vec<Mt5Position>, HttpClientError> {
+        self.get_positions().await
+    }
+    
+    async fn py_get_trades(&self) -> Result<Vec<Mt5Trade>, HttpClientError> {
+        self.get_trades().await
+    }
+    
+    async fn py_get_orders(&self) -> Result<Vec<Mt5OrderResponse>, HttpClientError> {
+        self.get_orders().await
+    }
+    
+    async fn py_submit_order(&self, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
+        self.submit_order(order).await
+    }
+    
+    async fn py_cancel_order(&self, order_id: u64) -> Result<(), HttpClientError> {
+        self.cancel_order(order_id).await
+    }
+    
+    async fn py_modify_order(&self, order_id: u64, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
+        self.modify_order(order_id, order).await
+    }
+    
+    async fn py_get_history(&self, symbol: Option<String>, from: Option<u64>, to: Option<u64>) -> Result<Vec<Mt5Trade>, HttpClientError> {
+        self.get_history(symbol.as_deref(), from, to).await
     }
 }
 
@@ -475,7 +629,7 @@ mod tests {
     #[cfg(test)]
     mod wiremock_tests {
         use super::*;
-        use wiremock::matchers::{method, path};
+        use wiremock::matchers::{method, path, query_param};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         #[tokio::test]
@@ -545,8 +699,8 @@ mod tests {
             let result = client.login().await;
             assert!(result.is_err());
             match result {
-                Err(HttpClientError::HttpError(401, _)) => (),
-                _ => panic!("Expected HttpError with status 401"),
+                Err(HttpClientError::AuthenticationError(_)) => (),
+                _ => panic!("Expected AuthenticationError for status 401"),
             }
         }
 
@@ -677,8 +831,8 @@ mod tests {
             let result = client.get_account_info().await;
             assert!(result.is_err());
             match result {
-                Err(HttpClientError::HttpError(401, _)) => (),
-                _ => panic!("Expected HttpError with status 401"),
+                Err(HttpClientError::AuthenticationError(_)) => (),
+                _ => panic!("Expected AuthenticationError for status 401"),
             }
         }
 
@@ -891,6 +1045,155 @@ mod tests {
 
             assert!(result.is_ok());
             assert!(result.unwrap().is_err());
+        }
+
+        #[tokio::test]
+        async fn test_get_symbol_info_with_token() {
+            let mock_server = MockServer::start().await;
+
+            Mock::given(method("GET"))
+                .and(path("/api/symbols/EURUSD"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "symbol": "EURUSD",
+                    "digits": 5,
+                    "pointSize": 0.00001,
+                    "volumeMin": 0.01,
+                    "volumeMax": 100.0,
+                    "volumeStep": 0.01,
+                    "contractSize": 10000.0,
+                    "marginInitial": 0.03,
+                    "marginMaintenance": 0.03
+                })))
+                .mount(&mock_server)
+                .await;
+
+            let config = Mt5Config {
+                api_key: "test_key".to_string(),
+                api_secret: "test_secret".to_string(),
+                base_url: mock_server.uri(),
+                ws_url: "ws://localhost".to_string(),
+                http_timeout: 30,
+                ws_timeout: 30,
+                proxy: None,
+            };
+            let cred = Mt5Credential {
+                login: "testuser".to_string(),
+                password: "testpass".to_string(),
+                server: "testserver".to_string(),
+                proxy: None,
+                token: Some("test_token_123".to_string()),
+            };
+            let url = Mt5Url::new(&config.base_url);
+
+            let client = Mt5HttpClient::new(config, cred, url).unwrap();
+            let result = client.get_symbol_info("EURUSD").await;
+            assert!(result.is_ok());
+
+            let symbol = result.unwrap();
+            assert_eq!(symbol.symbol, "EURUSD");
+            assert_eq!(symbol.digits, 5);
+        }
+
+        #[tokio::test]
+        async fn test_modify_order_with_token() {
+            let mock_server = MockServer::start().await;
+
+            Mock::given(method("POST"))
+                .and(path("/api/orders/12345"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "order_id": 12345,
+                    "symbol": "EURUSD",
+                    "volume": 2.0,
+                    "price": 1.09,
+                    "type": "BUY",
+                    "status": "MODIFIED"
+                })))
+                .mount(&mock_server)
+                .await;
+
+            let config = Mt5Config {
+                api_key: "test_key".to_string(),
+                api_secret: "test_secret".to_string(),
+                base_url: mock_server.uri(),
+                ws_url: "ws://localhost".to_string(),
+                http_timeout: 30,
+                ws_timeout: 30,
+                proxy: None,
+            };
+            let cred = Mt5Credential {
+                login: "testuser".to_string(),
+                password: "testpass".to_string(),
+                server: "testserver".to_string(),
+                proxy: None,
+                token: Some("test_token_123".to_string()),
+            };
+            let url = Mt5Url::new(&config.base_url);
+
+            let client = Mt5HttpClient::new(config, cred, url).unwrap();
+            let order = Mt5OrderRequest {
+                symbol: "EURUSD".to_string(),
+                volume: 2.0,
+                price: 1.09,
+                order_type: "BUY".to_string(),
+                comment: None,
+            };
+
+            let result = client.modify_order(12345, order).await;
+            assert!(result.is_ok());
+
+            let response = result.unwrap();
+            assert_eq!(response.order_id, 12345);
+            assert_eq!(response.volume, 2.0);
+            assert_eq!(response.status, "MODIFIED");
+        }
+
+        #[tokio::test]
+        async fn test_get_history_with_token() {
+            let mock_server = MockServer::start().await;
+
+            Mock::given(method("GET"))
+                .and(path("/api/history"))
+                .and(query_param("symbol", "EURUSD"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                    {
+                        "ticket": 1,
+                        "symbol": "EURUSD",
+                        "volume": 1.0,
+                        "open_price": 1.08,
+                        "close_price": 1.10,
+                        "open_time": 1678886400,
+                        "close_time": 1678972800
+                    }
+                ])))
+                .mount(&mock_server)
+                .await;
+
+            let config = Mt5Config {
+                api_key: "test_key".to_string(),
+                api_secret: "test_secret".to_string(),
+                base_url: mock_server.uri(),
+                ws_url: "ws://localhost".to_string(),
+                http_timeout: 30,
+                ws_timeout: 30,
+                proxy: None,
+            };
+            let cred = Mt5Credential {
+                login: "testuser".to_string(),
+                password: "testpass".to_string(),
+                server: "testserver".to_string(),
+                proxy: None,
+                token: Some("test_token_123".to_string()),
+            };
+            let url = Mt5Url::new(&config.base_url);
+
+            let client = Mt5HttpClient::new(config, cred, url).unwrap();
+            let result = client.get_history(Some("EURUSD"), None, None).await;
+            assert!(result.is_ok());
+
+            let history = result.unwrap();
+            assert_eq!(history.len(), 1);
+            assert_eq!(history[0].symbol, "EURUSD");
+            assert_eq!(history[0].close_price, Some(1.10));
         }
     }
 }

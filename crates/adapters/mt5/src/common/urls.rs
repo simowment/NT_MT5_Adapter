@@ -30,6 +30,10 @@ impl Mt5Url {
         format!("{}/api/symbols", self.base_url)
     }
 
+    pub fn symbol_info_url(&self, symbol: &str) -> String {
+        format!("{}/api/symbols/{}", self.base_url, symbol)
+    }
+
     pub fn rates_url(&self) -> String {
         format!("{}/api/rates", self.base_url)
     }
@@ -48,6 +52,10 @@ impl Mt5Url {
 
     pub fn positions_url(&self) -> String {
         format!("{}/api/positions", self.base_url)
+    }
+
+    pub fn history_url(&self) -> String {
+        format!("{}/api/history", self.base_url)
     }
 }
 
