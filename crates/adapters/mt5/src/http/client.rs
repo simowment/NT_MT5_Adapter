@@ -1,12 +1,32 @@
+// -------------------------------------------------------------------------------------------------
+//  Copyright (C) 2015-2025 Nautech Systems Pty Ltd. All rights reserved.
+//  https://nautechsystems.io
+//
+//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
+//  You may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
+//
+// Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+// -------------------------------------------------------------------------------------------------
+
 //! HTTP client implementation for MetaTrader 5 REST API.
-//! 
+//!
 //! This module implements the inner/outer client pattern with Arc wrapping
 //! for efficient cloning in Python bindings while keeping HTTP logic centralized.
 
 use std::sync::Arc;
 use std::time::Duration;
+
 use tokio::sync::Mutex;
-use reqwest::Client;
+use tracing::{debug, error, info};
+
+use nautilus_network::http::HttpClient as NautilusHttpClient;
+use nautilus_network::retry::RetryManager;
+
 use crate::common::credential::Mt5Credential;
 use crate::common::urls::Mt5Url;
 use crate::config::Mt5Config;
@@ -25,26 +45,44 @@ use pyo3::prelude::*;
 pub enum HttpClientError {
     #[error("Connection error: {0}")]
     ConnectionError(String),
+
     #[error("Request error: {0}")]
     RequestError(String),
+
     #[error("Response error: HTTP {0}: {1}")]
     HttpError(u16, String),
+
     #[error("Authentication error: {0}")]
     AuthenticationError(String),
+
     #[error("JSON decode error: {0}")]
     JsonDecodeError(String),
+
     #[error("Parse error: {0}")]
     ParseError(String),
+
     #[error("Server error: {0}")]
     ServerError(String),
 }
 
-// Inner client - contains actual HTTP logic
+impl HttpClientError {
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            HttpClientError::ConnectionError(_)
+                | HttpClientError::ServerError(_)
+        )
+    }
+}
+
+// Inner client - contient toute la logique HTTP + état partagé.
+// Utilise NautilusHttpClient pour profiter du rate limiting / retry unifié.
 pub struct Mt5HttpInnerClient {
     config: Mt5Config,
     credential: Arc<Mutex<Mt5Credential>>,
     url: Mt5Url,
-    http_client: Client,
+    http_client: NautilusHttpClient,
+    retry_manager: RetryManager<HttpClientError>,
 }
 
 // Outer client - wraps inner with Arc for cheap cloning (needed for Python)
@@ -55,26 +93,27 @@ pub struct Mt5HttpClient {
 
 impl Mt5HttpInnerClient {
     pub fn new(config: Mt5Config, credential: Mt5Credential, url: Mt5Url) -> Result<Self, HttpClientError> {
-        let timeout = Duration::from_secs(config.http_timeout);
-        
-        let mut client_builder = Client::builder()
-            .timeout(timeout);
+        let timeout = Duration::from_secs(config.http_timeout as u64);
+
+        let mut builder = NautilusHttpClient::builder()
+            .with_timeout(timeout);
 
         if let Some(proxy_url) = &config.proxy {
-            let proxy = reqwest::Proxy::all(proxy_url)
-                .map_err(|e| HttpClientError::ConnectionError(format!("Invalid proxy URL: {}", e)))?;
-            client_builder = client_builder.proxy(proxy);
+            builder = builder.with_proxy(proxy_url.to_string());
         }
 
-        let http_client = client_builder
+        let http_client = builder
             .build()
-            .map_err(|e| HttpClientError::ConnectionError(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| HttpClientError::ConnectionError(format!("failed to create HttpClient: {e}")))?;
+
+        let retry_manager = RetryManager::new(|err: &HttpClientError| err.is_retryable());
 
         Ok(Self {
             config,
             credential: Arc::new(Mutex::new(credential)),
             url,
             http_client,
+            retry_manager,
         })
     }
 
@@ -122,116 +161,175 @@ impl Mt5HttpInnerClient {
     }
 
     async fn http_get(&self, url: &str) -> Result<String, HttpClientError> {
-        let auth_header = self.get_auth_header().await?;
+        let auth = self.get_auth_header().await?;
 
-        let response = self.http_client
-            .get(url)
-            .header("Authorization", auth_header)
-            .send()
+        self.retry_manager
+            .run(|| async {
+                let response = self.http_client
+                    .get(url)
+                    .with_header("Authorization", auth.clone())
+                    .send()
+                    .await
+                    .map_err(|e| HttpClientError::RequestError(format!("GET {url} failed: {e}")))?;
+
+                let status = response.status();
+                let body = response
+                    .text()
+                    .await
+                    .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
+
+                if !status.is_success() {
+                    return Err(HttpClientError::HttpError(status.as_u16(), body));
+                }
+
+                Ok(body)
+            })
             .await
-            .map_err(|e| HttpClientError::RequestError(format!("GET request failed: {}", e)))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(HttpClientError::HttpError(status.as_u16(), error_text));
-        }
-
-        response
-            .text()
-            .await
-            .map_err(|e| HttpClientError::RequestError(format!("Failed to read response: {}", e)))
     }
 
     async fn http_post<T: serde::Serialize>(&self, url: &str, body: &T) -> Result<String, HttpClientError> {
-        let auth_header = self.get_auth_header().await?;
+        let auth = self.get_auth_header().await?;
 
-        let response = self.http_client
-            .post(url)
-            .header("Authorization", auth_header)
-            .json(body)
-            .send()
+        self.retry_manager
+            .run(|| async {
+                let response = self.http_client
+                    .post(url)
+                    .with_header("Authorization", auth.clone())
+                    .json(body)
+                    .send()
+                    .await
+                    .map_err(|e| HttpClientError::RequestError(format!("POST {url} failed: {e}")))?;
+
+                let status = response.status();
+                let body_text = response
+                    .text()
+                    .await
+                    .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
+
+                if !status.is_success() {
+                    return Err(HttpClientError::HttpError(status.as_u16(), body_text));
+                }
+
+                Ok(body_text)
+            })
             .await
-            .map_err(|e| HttpClientError::RequestError(format!("POST request failed: {}", e)))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(HttpClientError::HttpError(status.as_u16(), error_text));
-        }
-
-        response
-            .text()
-            .await
-            .map_err(|e| HttpClientError::RequestError(format!("Failed to read response: {}", e)))
     }
 
     async fn http_delete(&self, url: &str) -> Result<String, HttpClientError> {
-        let auth_header = self.get_auth_header().await?;
+        let auth = self.get_auth_header().await?;
 
-        let response = self.http_client
-            .delete(url)
-            .header("Authorization", auth_header)
-            .send()
+        self.retry_manager
+            .run(|| async {
+                let response = self.http_client
+                    .delete(url)
+                    .with_header("Authorization", auth.clone())
+                    .send()
+                    .await
+                    .map_err(|e| HttpClientError::RequestError(format!("DELETE {url} failed: {e}")))?;
+
+                let status = response.status();
+                let body = response
+                    .text()
+                    .await
+                    .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
+
+                if !status.is_success() {
+                    return Err(HttpClientError::HttpError(status.as_u16(), body));
+                }
+
+                Ok(body)
+            })
             .await
-            .map_err(|e| HttpClientError::RequestError(format!("DELETE request failed: {}", e)))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(HttpClientError::HttpError(status.as_u16(), error_text));
-        }
-
-        response
-            .text()
-            .await
-            .map_err(|e| HttpClientError::RequestError(format!("Failed to read response: {}", e)))
     }
 
     // High-level domain methods
     
-    pub async fn get_account_info(&self) -> Result<Mt5AccountInfo, HttpClientError> {
+    // HTTP low-level API calls (prefixed with http_)
+    
+    pub async fn http_get_account_info(&self) -> Result<String, HttpClientError> {
         let response = self.http_get(&self.url.account_info_url()).await?;
+        Ok(response)
+    }
+
+    pub async fn http_get_symbols(&self) -> Result<String, HttpClientError> {
+        let response = self.http_get(&self.url.symbols_url()).await?;
+        Ok(response)
+    }
+
+    pub async fn http_get_rates(&self, symbol: &str) -> Result<String, HttpClientError> {
+        let url = format!("{}?symbol={}", self.url.rates_url(), symbol);
+        let response = self.http_get(&url).await?;
+        Ok(response)
+    }
+
+    pub async fn http_get_positions(&self) -> Result<String, HttpClientError> {
+        let response = self.http_get(&self.url.positions_url()).await?;
+        Ok(response)
+    }
+
+    pub async fn http_get_trades(&self) -> Result<String, HttpClientError> {
+        let response = self.http_get(&self.url.trades_url()).await?;
+        Ok(response)
+    }
+
+    pub async fn http_get_orders(&self) -> Result<String, HttpClientError> {
+        let response = self.http_get(&self.url.orders_url()).await?;
+        Ok(response)
+    }
+
+    pub async fn http_submit_order(&self, order: &Mt5OrderRequest) -> Result<String, HttpClientError> {
+        let response = self.http_post(&self.url.orders_url(), order).await?;
+        Ok(response)
+    }
+
+    pub async fn http_cancel_order(&self, order_id: u64) -> Result<String, HttpClientError> {
+        let response = self.http_delete(&self.url.orders_by_id_url(order_id)).await?;
+        Ok(response)
+    }
+
+    // High-level domain methods (no prefix)
+    
+    pub async fn get_account_info(&self) -> Result<Mt5AccountInfo, HttpClientError> {
+        let response = self.http_get_account_info().await?;
         parse_account_info(&response).map_err(|e| HttpClientError::ParseError(e.to_string()))
     }
 
     pub async fn get_symbols(&self) -> Result<Vec<Mt5Symbol>, HttpClientError> {
-        let response = self.http_get(&self.url.symbols_url()).await?;
+        let response = self.http_get_symbols().await?;
         parse_symbols(&response).map_err(|e| HttpClientError::ParseError(e.to_string()))
     }
 
     pub async fn get_rates(&self, symbol: &str) -> Result<Vec<Mt5Rate>, HttpClientError> {
-        let url = format!("{}?symbol={}", self.url.rates_url(), symbol);
-        let response = self.http_get(&url).await?;
+        let response = self.http_get_rates(symbol).await?;
         parse_rates(&response).map_err(|e| HttpClientError::ParseError(e.to_string()))
     }
 
     pub async fn get_positions(&self) -> Result<Vec<Mt5Position>, HttpClientError> {
-        let response = self.http_get(&self.url.positions_url()).await?;
+        let response = self.http_get_positions().await?;
         serde_json::from_str::<Vec<Mt5Position>>(&response)
             .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse positions: {}", e)))
     }
 
     pub async fn get_trades(&self) -> Result<Vec<Mt5Trade>, HttpClientError> {
-        let response = self.http_get(&self.url.trades_url()).await?;
+        let response = self.http_get_trades().await?;
         serde_json::from_str::<Vec<Mt5Trade>>(&response)
             .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse trades: {}", e)))
     }
 
     pub async fn get_orders(&self) -> Result<Vec<Mt5OrderResponse>, HttpClientError> {
-        let response = self.http_get(&self.url.orders_url()).await?;
+        let response = self.http_get_orders().await?;
         serde_json::from_str::<Vec<Mt5OrderResponse>>(&response)
             .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse orders: {}", e)))
     }
 
     pub async fn submit_order(&self, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
-        let response = self.http_post(&self.url.orders_url(), &order).await?;
+        let response = self.http_submit_order(&order).await?;
         serde_json::from_str::<Mt5OrderResponse>(&response)
             .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse order response: {}", e)))
     }
 
     pub async fn cancel_order(&self, order_id: u64) -> Result<(), HttpClientError> {
-        let _response = self.http_delete(&self.url.orders_by_id_url(order_id)).await?;
+        let _response = self.http_cancel_order(order_id).await?;
         Ok(())
     }
 }
