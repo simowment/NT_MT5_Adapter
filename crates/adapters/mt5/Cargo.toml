@@ -19,6 +19,7 @@ pyo3 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+futures = "0.3"  # Added for async support in PyO3
 
 [features]
 default = []

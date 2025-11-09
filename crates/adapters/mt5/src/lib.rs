@@ -1,16 +1,12 @@
 #![doc = include_str!("../README.md")]
 
-pub mod bindings;
-pub mod client;
-pub mod consts;
-pub mod credential;
-pub mod enums;
-pub mod parse;
-pub mod urls;
+pub mod common;
+pub mod config;
+pub mod http;
+pub mod websocket;
+pub mod python;
 
-pub use client::{http, ws};
-pub use consts::*;
-pub use credential::*;
-pub use enums::*;
-pub use parse::*;
-pub use urls::*;
+pub use common::*;
+pub use config::*;
+pub use http::*;
+pub use websocket::*;

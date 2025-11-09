@@ -12,23 +12,43 @@ A Rust adapter for integrating MetaTrader 5 (MT5) with Nautilus Trader, providin
 
 ## Architecture
 
-The adapter follows a layered architecture:
+The adapter follows a layered architecture pattern with:
+
+- **Rust core** for networking clients and performance-critical operations
+- **Python layer** (optional) for integrating into the legacy system
+
+The Rust layer handles:
+
+- HTTP client: Raw API communication, request signing, rate limiting
+- WebSocket client: Low-latency streaming connections, message parsing
+- Parsing: Fast conversion of venue data to Nautilus domain models
+- Python bindings: PyO3 exports to make Rust functionality available to Python
+
+Typical Rust structure:
 
 ```
-┌─ src/
-│  ├─ lib.rs              # Module orchestration
-│  ├─ consts.rs           # Constants
-│  ├─ enums.rs            # Enumerations
-│  ├─ urls.rs             # URL management
-│  ├─ credential.rs       # Credential handling
-│  ├─ parse.rs            # Parsing utilities
-│  ├─ bindings.rs         # Python bindings
-│  └─ client/
-│     ├─ mod.rs           # Client module
-│     ├─ http.rs          # HTTP REST client
-│     └─ ws.rs            # WebSocket client
-├─ tests/                 # Integration tests
-└─ README.md
+crates/adapters/your_adapter/
+├── src/
+│   ├── common/           # Shared types and utilities
+│   │   ├── consts.rs     # Venue constants / broker IDs
+│   │   ├── credential.rs # API key storage and signing helpers
+│   │   ├── enums.rs      # Venue enums mirrored in REST/WS payloads
+│   │   ├── urls.rs       # Environment & product aware base-url resolvers
+│   │   ├── parse.rs      # Shared parsing helpers
+│   │   └── testing.rs    # Fixtures reused across unit tests
+│   ├── http/             # HTTP client implementation
+│   │   ├── client.rs     # HTTP client with authentication
+│   │   ├── models.rs     # Structs for REST payloads
+│   │   ├── query.rs      # Request and query builders
+│   │   └── parse.rs      # Response parsing functions
+│   ├── websocket/        # WebSocket implementation
+│   │   ├── client.rs     # WebSocket client
+│   │   ├── messages.rs   # Structs for stream payloads
+│   │   └── parse.rs      # Message parsing functions
+│   ├── python/           # PyO3 Python bindings
+│   ├── config.rs         # Configuration structures
+│   └── lib.rs            # Library entry point
+└── tests/                # Integration tests with mock servers
 ```
 
 ## Building

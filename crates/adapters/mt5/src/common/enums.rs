@@ -2,7 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "python-bindings")]
+use pyo3::prelude::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "python-bindings", pyclass)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum ConnectionStatus {
     Connected,
@@ -19,5 +23,17 @@ impl std::fmt::Display for ConnectionStatus {
             ConnectionStatus::Connecting => write!(f, "CONNECTING"),
             ConnectionStatus::Error => write!(f, "ERROR"),
         }
+    }
+}
+
+#[cfg(feature = "python-bindings")]
+#[pymethods]
+impl ConnectionStatus {
+    fn __str__(&self) -> String {
+        self.to_string()
+    }
+    
+    fn __repr__(&self) -> String {
+        format!("ConnectionStatus.{}", self.to_string())
     }
 }
