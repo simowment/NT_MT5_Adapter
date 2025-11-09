@@ -10,6 +10,8 @@ pub struct Mt5Config {
     pub ws_url: String,
     pub http_timeout: u64,
     pub ws_timeout: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
 }
 
 impl Default for Mt5Config {
@@ -21,6 +23,7 @@ impl Default for Mt5Config {
             ws_url: "wss://mt5.example.com".to_string(),
             http_timeout: 30,
             ws_timeout: 30,
+            proxy: None,
         }
     }
 }

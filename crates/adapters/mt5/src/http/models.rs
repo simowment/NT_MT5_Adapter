@@ -6,6 +6,18 @@ use serde::{Deserialize, Serialize};
 use pyo3::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mt5LoginRequest {
+    pub login: String,
+    pub password: String,
+    pub server: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mt5LoginResponse {
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python-bindings", pyclass)]
 #[serde(rename_all = "camelCase")]
 pub struct Mt5AccountInfo {
@@ -65,4 +77,46 @@ pub struct Mt5Rate {
     pub close: f64,
     #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub tick_volume: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mt5OrderRequest {
+    pub symbol: String,
+    pub volume: f64,
+    pub price: f64,
+    #[serde(rename = "type")]
+    pub order_type: String,
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mt5OrderResponse {
+    pub order_id: u64,
+    pub symbol: String,
+    pub volume: f64,
+    pub price: f64,
+    #[serde(rename = "type")]
+    pub order_type: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mt5Position {
+    pub ticket: u64,
+    pub symbol: String,
+    pub volume: f64,
+    pub open_price: f64,
+    pub current_price: f64,
+    pub profit: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mt5Trade {
+    pub ticket: u64,
+    pub symbol: String,
+    pub volume: f64,
+    pub open_price: f64,
+    pub close_price: Option<f64>,
+    pub open_time: u64,
+    pub close_time: Option<u64>,
 }
