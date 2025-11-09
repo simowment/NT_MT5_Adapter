@@ -18,16 +18,36 @@ impl Mt5Url {
         &self.base_url
     }
 
+    pub fn login_url(&self) -> String {
+        format!("{}/api/login", self.base_url)
+    }
+
     pub fn account_info_url(&self) -> String {
-        format!("{}/account/info", self.base_url)
+        format!("{}/api/account", self.base_url)
     }
 
     pub fn symbols_url(&self) -> String {
-        format!("{}/symbols", self.base_url)
+        format!("{}/api/symbols", self.base_url)
     }
 
     pub fn rates_url(&self) -> String {
-        format!("{}/rates", self.base_url)
+        format!("{}/api/rates", self.base_url)
+    }
+
+    pub fn orders_url(&self) -> String {
+        format!("{}/api/orders", self.base_url)
+    }
+
+    pub fn orders_by_id_url(&self, order_id: u64) -> String {
+        format!("{}/api/orders/{}", self.base_url, order_id)
+    }
+
+    pub fn trades_url(&self) -> String {
+        format!("{}/api/trades", self.base_url)
+    }
+
+    pub fn positions_url(&self) -> String {
+        format!("{}/api/positions", self.base_url)
     }
 }
 

@@ -20,6 +20,10 @@ pub struct Mt5Credential {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub proxy: Option<String>,
+    #[builder(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
+    pub token: Option<String>,
 }
 
 impl Mt5Credential {
@@ -38,6 +42,7 @@ impl Mt5Credential {
             password,
             server,
             proxy: None,
+            token: None,
         }
     }
 }
@@ -59,5 +64,6 @@ mod tests {
         assert_eq!(cred.password, "pass123");
         assert_eq!(cred.server, "mt5.example.com");
         assert_eq!(cred.proxy, None);
+        assert_eq!(cred.token, None);
     }
 }

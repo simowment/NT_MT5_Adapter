@@ -13,10 +13,13 @@ rust-version = "1.70"
 tokio = { version = "1.35", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_with = "3.4"
 ustr = "1.0"
 derive_builder = "0.12"
 thiserror = "1.0"
 pyo3 = { version = "0.20", features = ["extension-module"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+base64 = "0.21"
 
 # Dev dependencies
 [workspace.dependencies.axum]
