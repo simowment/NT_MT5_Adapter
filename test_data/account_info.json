@@ -1,0 +1,14 @@
+{
+  "login": 123456789,
+  "name": "Test Account",
+  "server": "mt5.example.com",
+  "currency": "USD",
+  "leverage": 100,
+  "balance": 10000.00,
+  "equity": 10000.00,
+  "margin_free": 10000.00,
+  "margin_level": 0,
+  "margin_used": 0,
+  "positions_total": 0,
+  "trades_total": 0
+}
