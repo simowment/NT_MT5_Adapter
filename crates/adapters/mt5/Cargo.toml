@@ -1,0 +1,29 @@
+[package]
+name = "nautilus-adapters-mt5"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors = ["Nautilus Trader Team"]
+license = "LGPL-3.0-or-later"
+description = "MetaTrader 5 adapter for Nautilus Trader"
+repository = "https://github.com/nautechsystems/nautilus-trader"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ustr = { workspace = true }
+derive_builder = { workspace = true }
+thiserror = { workspace = true }
+pyo3 = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[features]
+default = []
+python-bindings = []
+
+[lib]
+name = "nautilus_adapters_mt5"
+path = "src/lib.rs"
