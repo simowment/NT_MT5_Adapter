@@ -147,6 +147,28 @@ impl Mt5WebSocketClient {
         let mut confirmed = self.confirmed_subscriptions.lock().await;
         
         if pending.contains(topic) {
+    pub async fn subscription_count(&self) -> usize {
+        self.confirmed_subscriptions.lock().await.len()
+    }
+
+    // Specific subscription methods for data client
+    pub async fn subscribe_quotes(&self, symbol: &str) -> Result<(), WebSocketError> {
+        let topic = format!("quote:{}", symbol);
+        self.subscribe(&topic).await;
+        Ok(())
+    }
+
+    pub async fn subscribe_trades(&self, symbol: &str) -> Result<(), WebSocketError> {
+        let topic = format!("trade:{}", symbol);
+        self.subscribe(&topic).await;
+        Ok(())
+    }
+
+    pub async fn subscribe_order_book(&self, symbol: &str) -> Result<(), WebSocketError> {
+        let topic = format!("orderbook:{}", symbol);
+        self.subscribe(&topic).await;
+        Ok(())
+    }
             pending.remove(topic);
             confirmed.insert(topic.to_string());
         }
