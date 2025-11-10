@@ -30,6 +30,9 @@ pub fn nautilus_adapters_mt5(_py: Python, m: &PyModule) -> PyResult<()> {
 
     // Add configuration classes
     m.add_class::<crate::config::Mt5Config>()?;
+    m.add_class::<crate::config::instrument_provider::Mt5InstrumentProviderConfig>()?;
+    m.add_class::<crate::config::data_client::Mt5DataClientConfig>()?;
+    m.add_class::<crate::config::execution_client::Mt5ExecutionClientConfig>()?;
 
     // Add common types
     m.add_class::<crate::common::credential::Mt5Credential>()?;
@@ -48,9 +51,9 @@ pub fn nautilus_adapters_mt5(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<crate::websocket::client::Mt5WebSocketClient>()?;
 
     // Add query parameter builders
-    m.add_class::<crate::http::query::AccountInfoParamsBuilder>()?;
-    m.add_class::<crate::http::query::SymbolsInfoParamsBuilder>()?;
-    m.add_class::<crate::http::query::RatesInfoParamsBuilder>()?;
+    m.add_class::<crate::http::query::AccountInfoParams>()?;
+    m.add_class::<crate::http::query::SymbolsInfoParams>()?;
+    m.add_class::<crate::http::query::RatesInfoParams>()?;
 
     Ok(())
 }

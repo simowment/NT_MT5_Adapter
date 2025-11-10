@@ -70,23 +70,23 @@ pub fn parse_symbols(data: &str) -> Result<Vec<Mt5Symbol>, HttpParseError> {
                 .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
             volume_min: extract_number_field(item, "volumeMin")
                 .or_else(|_| Ok(0.01)) // Default value if not present
-                .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+                .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
             volume_max: extract_number_field(item, "volumeMax")
                 .or_else(|_| Ok(100.0)) // Default value if not present
-                .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+                .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
             volume_step: extract_number_field(item, "volumeStep")
                 .or_else(|_| extract_number_field(item, "trade_tick_size"))
                 .or_else(|_| Ok(0.01)) // Default value if not present
-                .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+                .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
             contract_size: extract_number_field(item, "contractSize")
                 .or_else(|_| extract_number_field(item, "trade_contract_size"))
                 .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
             margin_initial: extract_number_field(item, "marginInitial")
                 .or_else(|_| Ok(0.0)) // Default value if not present
-                .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+                .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
             margin_maintenance: extract_number_field(item, "marginMaintenance")
                 .or_else(|_| Ok(0.0)) // Default value if not present
-                .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+                .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
         };
         symbols.push(symbol);
     }
@@ -107,23 +107,23 @@ pub fn parse_single_symbol(data: &Value) -> Result<Mt5Symbol, HttpParseError> {
             .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
         volume_min: extract_number_field(data, "volumeMin")
             .or_else(|_| Ok(0.01)) // Default value if not present
-            .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+            .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
         volume_max: extract_number_field(data, "volumeMax")
             .or_else(|_| Ok(100.0)) // Default value if not present
-            .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+            .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
         volume_step: extract_number_field(data, "volumeStep")
             .or_else(|_| extract_number_field(data, "trade_tick_size"))
             .or_else(|_| Ok(0.01)) // Default value if not present
-            .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+            .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
         contract_size: extract_number_field(data, "contractSize")
             .or_else(|_| extract_number_field(data, "trade_contract_size"))
             .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
         margin_initial: extract_number_field(data, "marginInitial")
             .or_else(|_| Ok(0.0)) // Default value if not present
-            .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+            .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
         margin_maintenance: extract_number_field(data, "marginMaintenance")
             .or_else(|_| Ok(0.0)) // Default value if not present
-            .map_err(|e| HttpParseError::MissingField(e.to_string()))?,
+            .map_err(|e: HttpParseError| HttpParseError::MissingField(e.to_string()))?,
     })
 }
 

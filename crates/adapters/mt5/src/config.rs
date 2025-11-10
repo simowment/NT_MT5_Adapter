@@ -13,11 +13,11 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-//! Configuration structures for the MetaTrader 5 adapter.
-//!
-//! This module defines the configuration structures for the MT5 adapter,
-//! including base configuration and specialized configurations for different
-//! adapter components.
+ //! Configuration structures for the MetaTrader 5 adapter.
+ //!
+ //! This module defines the configuration structures for the MT5 adapter.
+ //! Mt5Config décrit les endpoints et timeouts HTTP/WS du bridge MT5.
+ //! Les identifiants (login/password/server) sont portés par `Mt5Credential` (common/credential.rs).
 
 use serde::{Deserialize, Serialize};
 
@@ -28,10 +28,6 @@ pub mod execution_client;
 /// Main configuration for the MT5 adapter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mt5Config {
-    /// The API key for authentication.
-    pub api_key: String,
-    /// The API secret for authentication.
-    pub api_secret: String,
     /// The base URL for the MT5 REST API.
     pub base_url: String,
     /// The WebSocket URL for MT5 streaming.
@@ -48,10 +44,8 @@ pub struct Mt5Config {
 impl Default for Mt5Config {
     fn default() -> Self {
         Self {
-            api_key: String::new(),
-            api_secret: String::new(),
-            base_url: "https://mt5.example.com".to_string(),
-            ws_url: "wss://mt5.example.com".to_string(),
+            base_url: "http://localhost:8000".to_string(),
+            ws_url: "ws://localhost:8000".to_string(),
             http_timeout: 30,
             ws_timeout: 30,
             proxy: None,
@@ -60,25 +54,25 @@ impl Default for Mt5Config {
 }
 
 impl Mt5Config {
-    /// Creates a new configuration with the specified credentials.
+    /// Creates a new configuration with the specified base URLs.
     ///
     /// # Arguments
     ///
-    /// * `api_key` - The API key for authentication
-    /// * `api_secret` - The API secret for authentication
+    /// * `base_url` - The base URL for the MT5 REST API
+    /// * `ws_url` - The WebSocket URL for MT5 streaming
     ///
     /// # Returns
     ///
-    /// A new configuration instance with the specified credentials.
-    pub fn with_credentials(api_key: String, api_secret: String) -> Self {
+    /// A new configuration instance with the specified URLs.
+    pub fn with_urls(base_url: String, ws_url: String) -> Self {
         let mut config = Self::default();
-        config.api_key = api_key;
-        config.api_secret = api_secret;
+        config.base_url = base_url;
+        config.ws_url = ws_url;
         config
     }
 }
 
 // Re-exports for convenience
-pub use instrument_provider::{Mt5InstrumentProviderConfig, Mt5Credentials};
+pub use instrument_provider::Mt5InstrumentProviderConfig;
 pub use data_client::Mt5DataClientConfig;
 pub use execution_client::Mt5ExecutionClientConfig;

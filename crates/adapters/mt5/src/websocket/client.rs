@@ -17,24 +17,20 @@
 //!
 //! This module handles connection state, authentication, subscriptions, and reconnection logic.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::{error};
 
-use tokio_tungstenite::{connect_async, tungstenite::Message};
-use futures_util::{SinkExt, StreamExt, pin_mut};
 use crate::common::credential::Mt5Credential;
-use crate::websocket::messages::{
-    WsPing, WsPong, WsAuthRequest, WsAuthResponse,
-    WsSubscribeRequest, WsUnsubscribeRequest, WsSubscriptionResponse,
-    WsQuote, WsTrade, WsOrderBook
-};
-use crate::websocket::parse::{parse_websocket_message, WsMessage};
+use crate::websocket::messages::{WsPing, WsPong};
+use crate::websocket::parse::WsMessage;
 use thiserror::Error;
 
 #[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
+#[cfg(feature = "python-bindings")]
+use pyo3_async_runtimes::tokio::future_into_py;
 
 #[derive(Debug, Error)]
 pub enum WebSocketError {
@@ -138,15 +134,16 @@ impl Mt5WebSocketClient {
         }
     }
 
-    pub async fn subscription_count(&self) -> usize {
-        self.confirmed_subscriptions.lock().await.len()
-    }
-
     pub async fn confirm_subscription(&self, topic: &str) {
         let mut pending = self.pending_subscriptions.lock().await;
         let mut confirmed = self.confirmed_subscriptions.lock().await;
         
         if pending.contains(topic) {
+            pending.remove(topic);
+            confirmed.insert(topic.to_string());
+        }
+    }
+
     pub async fn subscription_count(&self) -> usize {
         self.confirmed_subscriptions.lock().await.len()
     }
@@ -169,12 +166,8 @@ impl Mt5WebSocketClient {
         self.subscribe(&topic).await;
         Ok(())
     }
-            pending.remove(topic);
-            confirmed.insert(topic.to_string());
-        }
-    }
 
-    pub async fn mark_subscription_failure(&self, topic: &str) {
+    pub async fn mark_subscription_failure(&self, _topic: &str) {
         // Keep it in pending for retry on reconnect
         // The topic should already be in pending_subscriptions
     }
@@ -227,7 +220,7 @@ impl Mt5WebSocketClient {
     // Message routing
     pub async fn route_message(&self, message: WsMessage) -> Result<(), WebSocketError> {
         match message {
-            WsMessage::Ping(ping) => {
+            WsMessage::Ping(_ping) => {
                 // Respond to ping
                 let pong = self.handle_ping();
                 // In real implementation, would send pong back
@@ -287,31 +280,53 @@ impl Mt5WebSocketClient {
         Self::new(credential, url)
     }
     
-    fn py_connect(&mut self) -> Result<(), WebSocketError> {
-        // Note: This would need to be adapted for async in PyO3
-        // For simplicity, using a blocking call here
-        // In practice, you'd want to use pyo3_async_runtimes
-        futures::executor::block_on(self.connect())
+    #[pyo3(name = "connect")]
+    fn py_connect(&mut self) -> PyResult<PyObject> {
+        // Use pyo3_async_runtimes to convert Rust future to Python awaitable
+        future_into_py(self.py().unwrap(), async move {
+            self.connect().await
+        })
     }
     
-    fn py_disconnect(&mut self) -> Result<(), WebSocketError> {
-        futures::executor::block_on(self.disconnect())
+    #[pyo3(name = "disconnect")]
+    fn py_disconnect(&mut self) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.disconnect().await
+        })
     }
     
+    #[pyo3(name = "subscribe")]
     fn py_subscribe(&mut self, topic: &str) {
-        self.subscribe(topic);
+        Python::with_gil(|py| {
+            future_into_py(py, async move {
+                self.subscribe(topic).await;
+                Ok(())
+            })
+        })
     }
     
+    #[pyo3(name = "unsubscribe")]
     fn py_unsubscribe(&mut self, topic: &str) {
-        self.unsubscribe(topic);
+        Python::with_gil(|py| {
+            future_into_py(py, async move {
+                self.unsubscribe(topic).await;
+                Ok(())
+            })
+        })
     }
     
-    fn py_is_authenticated(&self) -> bool {
-        self.is_authenticated()
+    #[pyo3(name = "is_authenticated")]
+    fn py_is_authenticated(&self) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.is_authenticated().await
+        })
     }
     
-    fn py_subscription_count(&self) -> usize {
-        self.subscription_count()
+    #[pyo3(name = "subscription_count")]
+    fn py_subscription_count(&self) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.subscription_count().await
+        })
     }
 }
 
@@ -327,10 +342,11 @@ mod tests {
             .server("server")
             .build()
             .unwrap();
-        let mut client = Mt5WebSocketClient::new(cred, "ws://localhost");
+        let client = Mt5WebSocketClient::new(cred, "ws://localhost");
 
         assert_eq!(client.url, "ws://localhost");
-        assert!(!client.is_authenticated());
+        // CORRECTION: is_authenticated() est async, nécessite await
+        assert!(!client.is_authenticated().await);
     }
 
     #[tokio::test]
@@ -341,23 +357,23 @@ mod tests {
             .server("server")
             .build()
             .unwrap();
-        let mut client = Mt5WebSocketClient::new(cred, "ws://localhost");
+        let client = Mt5WebSocketClient::new(cred, "ws://localhost");
 
         // Test subscription
-        client.subscribe("EURUSD");
-        assert!(client.pending_subscriptions.contains("EURUSD"));
-        assert_eq!(client.subscription_count(), 0);
+        client.subscribe("EURUSD").await;
+        assert!(client.pending_subscriptions.lock().await.contains("EURUSD"));
+        assert_eq!(client.subscription_count().await, 0);
 
         // Test confirmation
-        client.confirm_subscription("EURUSD");
-        assert!(!client.pending_subscriptions.contains("EURUSD"));
-        assert!(client.confirmed_subscriptions.contains("EURUSD"));
-        assert_eq!(client.subscription_count(), 1);
+        client.confirm_subscription("EURUSD").await;
+        assert!(!client.pending_subscriptions.lock().await.contains("EURUSD"));
+        assert!(client.confirmed_subscriptions.lock().await.contains("EURUSD"));
+        assert_eq!(client.subscription_count().await, 1);
 
         // Test unsubscription
-        client.unsubscribe("EURUSD");
-        assert!(client.pending_subscriptions.contains("EURUSD"));
-        assert!(!client.confirmed_subscriptions.contains("EURUSD"));
-        assert_eq!(client.subscription_count(), 0);
+        client.unsubscribe("EURUSD").await;
+        assert!(client.pending_subscriptions.lock().await.contains("EURUSD"));
+        assert!(!client.confirmed_subscriptions.lock().await.contains("EURUSD"));
+        assert_eq!(client.subscription_count().await, 0);
     }
 }

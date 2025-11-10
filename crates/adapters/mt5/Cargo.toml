@@ -16,9 +16,17 @@ serde_with = { workspace = true }
 ustr = { workspace = true }
 derive_builder = { workspace = true }
 thiserror = { workspace = true }
-pyo3 = { workspace = true }
-reqwest = { workspace = true }
+pyo3 = "0.27"
+pyo3-async-runtimes = "0.27"
+reqwest = { workspace = true, features = ["json"] }
 base64 = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tokio-tungstenite = "0.28.0"
+futures-util = "0.3"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+anyhow = "1.0"
+nautilus-network = "0.51.0"
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -27,8 +35,10 @@ wiremock = { workspace = true }
 
 [features]
 default = []
-python-bindings = []
+python = ["pyo3/extension-module"]
+python-bindings = ["python"]
 
 [lib]
 name = "nautilus_adapters_mt5"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]

@@ -26,7 +26,6 @@ Ces tests valident que tous les composants Python fonctionnent correctement ense
 import pytest
 import asyncio
 from unittest.mock import Mock, patch, AsyncMock
-from typing import List, Dict, Any
 
 # Imports des composants MT5
 from nautilus_trader.adapters.mt5.config import (

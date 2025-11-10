@@ -59,7 +59,9 @@ NT_MT5_Adapter/
 ├── Cargo.toml                   # Dépendances Rust
 ├── pyproject.toml               # Dépendances Python
 ├── build_mt5_adapter.sh         # Script de compilation
-└── demo_mt5_backtest.py         # Exemple d'utilisation
+├── demo_mt5_backtest.py         # Exemple d'utilisation
+├── demo_real_mt5_backtest.py    # Exemple de backtest avec données réelles
+└── ADAPTER_COMPLIANCE.md        # Vérification de conformité
 ```
 
 ## 🚀 Installation
@@ -115,6 +117,67 @@ node = TradingNode(config)
 
 # Démarrer le trading
 node.start()
+```
+
+## 🧪 Backtesting avec Données MT5
+
+### **Préparation pour le Backtest**
+
+L'adaptateur MT5 permet d'utiliser les données historiques réelles de MetaTrader 5 dans des backtests Nautilus Trader. Voici comment procéder :
+
+1. **Charger les instruments MT5** :
+   ```python
+   from nautilus_trader.adapters.mt5.providers import Mt5InstrumentProvider, Mt5InstrumentProviderConfig
+
+   provider_config = Mt5InstrumentProviderConfig(
+       mt5_host="localhost",
+       mt5_port=8080,
+       mt5_login="your_login",
+       mt5_password="your_password",
+       mt5_server="your_server",
+       backtest=True,  # Mode backtest
+   )
+
+   provider = Mt5InstrumentProvider(config=provider_config)
+   await provider.load_all_async()
+   ```
+
+2. **Charger les données historiques** :
+   ```python
+   # Dans un scénario réel, vous chargeriez les données historiques MT5
+   # puis les convertiriez au format Nautilus (Bar, QuoteTick, TradeTick)
+   ```
+
+3. **Utiliser dans le moteur de backtest** :
+   ```python
+   from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig
+
+   # Configuration du moteur de backtest
+   config = BacktestEngineConfig(log_level="INFO")
+   engine = BacktestEngine(config=config)
+
+   # Ajouter la venue MT5
+   from nautilus_trader.model.identifiers import Venue
+   mt5_venue = Venue("MT5")
+   engine.add_venue(
+       venue=mt5_venue,
+       # ... configuration de la venue
+   )
+
+   # Ajouter les données historiques MT5
+   # ... ajouter les instruments et les données
+   ```
+
+### **Exemple de Backtest Réel**
+
+Voir le fichier `demo_real_mt5_backtest.py` pour un exemple complet d'utilisation de l'adaptateur MT5 avec des données historiques réelles pour les backtests. Cet exemple montre comment :
+- Charger des instruments MT5
+- Récupérer des données historiques
+- Configurer le moteur de backtest
+- Exécuter une simulation avec données MT5 authentiques
+
+```bash
+python demo_real_mt5_backtest.py
 ```
 
 ## 🧪 Validation

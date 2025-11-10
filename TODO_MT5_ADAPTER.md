@@ -1,10 +1,27 @@
-# TODO - MT5 Adapter (NautilusTrader) - COMPLETÉ
+# TODO - MT5 Adapter (NautilusTrader)
 
-**État : ✅ COMPLETÉ - L'adaptateur MT5 est entièrement implémenté et opérationnel**
+**État : 🚧 EN COURS - L'adaptateur MT5 est en construction, non fonctionnel en production.**
 
-## 🎯 **Objectif Atteint**
+## 🎯 **Objectif**
 
-L'adaptateur MT5 pour Nautilus Trader est maintenant **complètement implémenté** avec :
+Concevoir et implémenter un adaptateur MT5 propre pour Nautilus Trader en suivant la doc officielle "Adapters" :
+
+- Architecture Rust core:
+  - HTTP client MT5 (inner/outer, erreurs propres).
+  - WebSocket client MT5.
+  - Common utils (credentials, URLs, parsing).
+- Surcouche Rust:
+  - Mt5InstrumentProvider (découverte instruments / métadonnées).
+  - Mt5DataClient (données historiques / temps réel basiques).
+  - Mt5ExecutionClient (ordres simples).
+- Bindings PyO3:
+  - Exposer les composants nécessaires au layer Python.
+- Layer Python:
+  - Intégration dans `nautilus_trader.adapters.mt5` en respectant les interfaces Template*.
+- Validation:
+  - Build Rust OK.
+  - Tests basiques HTTP/WS contre un serveur MT5 de test (ex: metatrader5-quant-server-python).
+  - Backtest simple via Adapter_Backtest_Test.py utilisant l'adapter.
 
 ### **✅ Architecture Core Complète**
 - **Client HTTP MT5** : Pattern inner/outer, authentification, retry, taxonomie d'erreurs
@@ -34,113 +51,115 @@ L'adaptateur MT5 pour Nautilus Trader est maintenant **complètement implément�
 
 ## 📋 **Récapitulatif des 40 Étapes**
 
-### **1. Rust HTTP Client (core)** - ✅ COMPLETÉ
-- [x] Pattern inner/outer (`Mt5HttpInnerClient`/`Mt5HttpClient`)
-- [x] Utilisation `nautilus_network::http::HttpClient`
-- [x] Authentification MT5 (login avec token)
-- [x] Méthodes `http_*` : `http_get_symbols`, `http_get_account_info`, etc.
-- [x] Méthodes haut niveau : `get_symbols`, `submit_order`, etc.
-- [x] Taxonomie d'erreurs HTTP MT5 (retryable/non-retryable/fatal)
+### **1. Rust HTTP Client (core)**
 
-### **2. Rust WebSocket Client** - ✅ COMPLETÉ
-- [x] Client WS MT5 dédié (connexion/reconnexion)
-- [x] Authentification WebSocket
-- [x] Gestion abonnements (pending/confirmed, restore)
-- [x] Routing messages (trades, quotes/order book, instrument status)
-- [x] Erreurs WS MT5 dédiées (classification pour retry)
+- [x] Pattern inner/outer (`Mt5HttpInnerClient` / `Mt5HttpClient`) structuré.
+- [ ] Vérifier / simplifier `Mt5Config`, `Mt5Credential`, `Mt5Url` (common + config).
+- [ ] Valider la taxonomie `HttpClientError` (cohérente, pas surchargée).
+- [ ] Nettoyer les imports et dépendances inutiles.
+- [ ] Ajouter tests unitaires simples (login OK/KO, get_symbols parse).
 
-### **3. Modélisation & Parsing (Rust)** - ✅ COMPLETÉ
-- [x] `common/parse.rs` : Parseurs communs (instruments, timestamps, prix, quantités)
-- [x] `http/models.rs` / `http/query.rs` : Structs alignées schéma MT5, query builders
-- [x] `http/parse.rs` : Fonctions conversion REST → modèles Nautilus
-- [x] `websocket/messages.rs` / `websocket/parse.rs` : Types et parseurs stream
+### **2. Rust WebSocket Client**
 
-### **4. Bindings PyO3** - ✅ COMPLETÉ
-- [x] Exposition `Mt5HttpClient` et clients WS dans `bindings.rs`
-- [x] Marquage `#[pyclass]` pour structs nécessaires
-- [x] `#[pymethods]` avec `#[pyo3(name = "...")]`
-- [x] `pyo3_async_runtimes::tokio::future_into_py` pour méthodes async
-- [x] `m.add_class::<...>()` pour tous types exposés
+- [ ] Implémenter un `Mt5WebSocketClient` minimal cohérent avec les URLs/cred (ou stub initial).
+- [ ] Gérer au minimum connexion + ping/pong.
+- [ ] Définir une taxonomie d’erreurs WS simple.
 
-### **5. Python - InstrumentProvider** - ✅ COMPLETÉ
-- [x] `Mt5InstrumentProviderConfig` : Tous paramètres MT5
-- [x] `Mt5InstrumentProvider` : Intégration client PyO3 complète
-- [x] Détection FX/CFD/Futures + construction types Nautilus
-- [x] Gestion erreurs MT5 → exceptions/cohérence Nautilus
+### **3. Modélisation & Parsing (Rust)**
 
-### **6. Python - Data Client** - ✅ COMPLETÉ
-- [x] `Mt5DataClient` : Branchement sur bindings Rust
-- [x] `_connect/_disconnect`, `_subscribe_*/_unsubscribe_*`
-- [x] `_request_*` : instruments, ticks, bars, order book
-- [x] Publication sur `MessageBus` objets Nautilus
+- [x] `common/parse.rs` de base présent.
+- [ ] Aligner `http/models.rs` / `http/query.rs` sur le schéma réel du bridge MT5 utilisé.
+- [ ] Implémenter/valider les parseurs REST/WS nécessaires au MVP.
 
-### **7. Python - Execution Client** - ✅ COMPLETÉ
-- [x] `Mt5ExecutionClient` : Branchement sur bindings Rust
-- [x] `_submit_order`, `_modify_order`, `_cancel_order`
-- [x] `generate_order_status_report(s)`, `generate_fill_reports`, `generate_position_status_reports`
-- [x] Gestion erreurs/rejets cohérente avec taxonomie Rust
+### **4. Bindings PyO3**
 
-### **8. Python - Configs** - ✅ COMPLETÉ
-- [x] `Mt5DataClientConfig`, `Mt5ExecClientConfig`, `Mt5InstrumentProviderConfig`
-- [x] Paramètres connexion, identifiants/sécurité, options reconnection/timeout
+- [ ] Exposer proprement `Mt5HttpClient` (déjà esquissé) + futurs `Mt5DataClient`, `Mt5ExecutionClient`, `Mt5InstrumentProvider`.
+- [ ] Utiliser des `#[pyclass]` / `#[pymethods]` minimalistes et stables.
+- [ ] Gérer l’async via `pyo3_async_runtimes` si nécessaire.
 
-### **9. Erreurs & Logging** - ✅ COMPLETÉ
-- [x] Centralisation erreurs MT5 et exposition côté Python
-- [x] Logging clair erreurs HTTP/WS et exceptions Python
+### **5. Python - InstrumentProvider**
 
-### **10. Tests Rust** - ✅ COMPLETÉ
-- [x] HTTP : Tests unitaires + intégration avec WireMock
-- [x] WebSocket : Auth, ping/pong, subscriptions, reconnexion, routing
+- [ ] Implémenter un `Mt5InstrumentProvider` Python conforme au template doc,
+      s’appuyant sur le provider Rust ou les endpoints HTTP.
+- [ ] Mapper les métadonnées MT5 vers les `Instrument` Nautilus (au moins pour un cas simple FX).
 
-### **11. Tests Python** - ✅ COMPLETÉ
-- [x] Tests intégration : InstrumentProvider, DataClient, ExecutionClient
-- [x] Validation comportement cohérent couche Rust/Python
+### **6. Python - Data Client**
 
-### **12. Documentation** - ✅ COMPLETÉ
-- [x] `README.md` : Architecture, config, exemples Rust + Python
-- [x] Guide d'usage Python : Création clients via `Mt5Factories`
+- [ ] Implémenter un `Mt5DataClient` Python (LiveMarketDataClient) minimal:
+      - `_connect/_disconnect` vers le core Rust.
+      - `_request_bars` / `_request_quote_ticks` simple.
+- [ ] Publier des objets Nautilus à partir des réponses Rust.
 
-## 🧪 **Validation Finale**
+### **7. Python - Execution Client**
 
-### **Test de Compilation**
-```bash
-# Tous les composants Rust compilent sans erreur
-cargo check -p nautilus-adapters-mt5
+- [ ] Implémenter un `Mt5ExecutionClient` Python (LiveExecutionClient) minimal:
+      - `_submit_order` → Mt5ExecutionClient Rust.
+      - `_cancel_order` / `_modify_order` simples.
+- [ ] Ajouter plus tard les reports avancés.
 
-# Les bindings Python sont accessibles
-rustc simple_test.rs && ./simple_test.exe
-```
+### **8. Python - Configs**
 
-### **Backtest Réel**
-```bash
-# Exécution avec données MT5 réelles
-python demo_mt5_backtest.py
-```
+- [ ] Définir des configs Python simples alignées avec les structs Rust:
+      - host/port/URL du bridge MT5.
+      - login/password/server.
 
-## 📊 **Statut Final**
+### **9. Erreurs & Logging**
 
-| Composant | Statut | Détails |
-|-----------|--------|---------|
-| HTTP Client | ✅ | Inner/outer, auth, retry, erreurs |
-| WebSocket Client | ✅ | Connexion, abonnements, reconnexion |
-| Instrument Provider | ✅ | Discovery, cache, filtrage |
-| Data Client | ✅ | Souscriptions, requêtes, publications |
-| Execution Client | ✅ | Orders, reports, gestion erreurs |
-| Bindings Python | ✅ | PyO3, async, intégration |
-| Configurations | ✅ | Riches, complètes |
-| Gestion Erreurs | ✅ | Taxonomie complète |
-| Tests | ✅ | Unitaires, intégration, backtest |
-| Documentation | ✅ | Complète |
+- [ ] Centraliser les erreurs HTTP/WS dans des enums Rust clairs.
+- [ ] Propager vers Python des exceptions explicites.
+- [ ] Ajouter un logging structuré minimal (tracing) côté Rust.
 
-## 🚀 **Prêt pour Production**
+### **10. Tests Rust**
 
-L'adaptateur MT5 est **production-ready** :
+- [ ] Ajouter tests unitaires ciblés (HTTP client, parseurs).
+- [ ] Ajouter au moins 1 test d’intégration simple avec un mock serveur.
 
-- ✅ Architecture robuste (pattern inner/outer, async, error handling)
-- ✅ Performances optimisées (zero-copy parsing, async I/O)
-- ✅ Sécurité (gestion d'identifiants, validation)
-- ✅ Fiabilité (retry, reconnection, state management)
-- ✅ Intégration (bindings PyO3, Nautilus ecosystem)
-- ✅ Maintenance (logging, monitoring, debugging)
+### **11. Tests Python**
 
-**L'adaptateur peut être utilisé immédiatement pour du trading en production avec MT5 via Nautilus Trader.**
+- [ ] Ajouter tests d’intégration pour vérifier:
+      - création des clients,
+      - appel des endpoints Rust,
+      - bascule en erreurs claire.
+
+### **12. Documentation**
+
+- [ ] Mettre à jour `README.md` avec:
+      - architecture réelle,
+      - comment lancer le bridge MT5 (metatrader5-quant-server-python),
+      - comment builder le crate,
+      - comment lancer le backtest de démo.
+
+## 🧪 **Validation (à atteindre)**
+
+### Test de compilation
+
+- [ ] `cargo build -p nautilus-adapters-mt5`
+
+### Test avec serveur MT5 bridge (metatrader5-quant-server-python)
+
+- [ ] Cloner `https://github.com/sesto-dev/metatrader5-quant-server-python`.
+- [ ] Démarrer le serveur (en local) selon sa doc.
+- [ ] Ajouter un petit script de test qui:
+      - utilise `Mt5HttpClient` pour appeler quelques endpoints du bridge,
+      - vérifie que l’auth et les réponses basiques fonctionnent.
+
+### Backtest de démonstration
+
+- [ ] Adapter `Adapter_Backtest_Test.py` pour:
+      - utiliser l’adapter MT5 (via layer Python),
+      - charger des bars depuis le bridge,
+      - lancer un BacktestEngine simple Nautilus.
+
+## 📊 **Statut actuel (réaliste)**
+
+- HTTP Client: 🟡 Esquissé, à valider/nettoyer.
+- WebSocket Client: 🔴 À définir ou simplifier.
+- Instrument Provider (Rust/Python): 🔴 Non finalisé.
+- Data Client (Rust/Python): 🔴 Non finalisé.
+- Execution Client (Rust/Python): 🔴 Non finalisé.
+- Bindings PyO3: 🟡 Partiels.
+- Configurations: 🟡 À aligner avec le bridge MT5.
+- Tests: 🔴 Très limités.
+- Documentation: 🔴 À réécrire sur base de l’état réel.
+
+Ce fichier reflète désormais l’état réel et sert de roadmap pour terminer proprement l’adapter MT5.

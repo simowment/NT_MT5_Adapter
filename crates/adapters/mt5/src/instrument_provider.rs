@@ -1,15 +1,11 @@
 //! MT5 Instrument Provider implementation.
 
-use crate::config::Mt5InstrumentProviderConfig;
-use crate::http::client::Mt5HttpClient;
+use crate::config::{Mt5Config, Mt5InstrumentProviderConfig};
+use crate::http::client::{Mt5HttpClient, HttpClientError};
 use crate::common::parse::InstrumentMetadata;
-use nautilus_trader_core::clock::Clock;
-use nautilus_trader_model::data::Data;
-use nautilus_trader_model::instruments::Instrument;
-use nautilus_trader_model::identifiers::InstrumentId;
-use nautilus_trader_model::types::Price;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use crate::common::credential::Mt5Credential;
+use crate::common::urls::Mt5Url;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
@@ -23,68 +19,110 @@ pub enum InstrumentProviderError {
     CacheError(String),
     #[error("Configuration error: {0}")]
     ConfigError(String),
+    #[error("HTTP client error: {0}")]
+    HttpClient(#[from] HttpClientError),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl From<String> for InstrumentProviderError {
+    fn from(s: String) -> Self {
+        InstrumentProviderError::ParseError(s)
+    }
 }
 
 pub struct Mt5InstrumentProvider {
     config: Mt5InstrumentProviderConfig,
     http_client: Arc<Mt5HttpClient>,
-    cache: Arc<RwLock<HashMap<InstrumentId, Instrument>>>,
-    clock: Clock,
+    cache: Arc<RwLock<Vec<InstrumentMetadata>>>,
 }
 
 impl Mt5InstrumentProvider {
     pub fn new(config: Mt5InstrumentProviderConfig) -> Result<Self, InstrumentProviderError> {
-        let http_client = Arc::new(Mt5HttpClient::new(config.base_url.clone(), config.credentials.clone())?);
-        
+        // Construire la config HTTP globale pour le client.
+        let http_config = Mt5Config {
+            base_url: config.base_url.clone(),
+            ws_url: config.ws_url.clone().unwrap_or_else(|| "ws://localhost:8080".to_string()),
+            http_timeout: config.http_timeout.unwrap_or(30),
+            ws_timeout: 30, // Default value since config doesn't have ws_timeout
+            proxy: None,
+        };
+
+        let cred = Mt5Credential {
+            login: config.credential.login.clone(),
+            password: config.credential.password.clone(),
+            server: config.credential.server.clone(),
+            proxy: None,
+            token: None,
+        };
+
+        let url = Mt5Url::new(&http_config.base_url);
+        let http_client = Arc::new(Mt5HttpClient::new(http_config, cred, url)?);
+
         Ok(Self {
             config,
             http_client,
-            cache: Arc::new(RwLock::new(HashMap::new())),
-            clock: Clock::new(),
+            cache: Arc::new(RwLock::new(Vec::new())),
         })
     }
 
     pub async fn discover_instruments(&self) -> Result<Vec<Instrument>, InstrumentProviderError> {
         // Get all symbols from MT5
-        let symbols = self.http_client.request_symbols().await
+        let symbols = self.http_client.get_symbols().await
             .map_err(|e| InstrumentProviderError::ConnectionError(e.to_string()))?;
 
-        // Filter instruments based on configuration
         let mut instruments = Vec::new();
-        
+
         for symbol in symbols {
-            if self.should_include_instrument(&symbol.symbol) {
-                let metadata = self.parse_symbol_metadata(&symbol)?;
-                let instrument = self.create_instrument(&metadata)?;
-                instruments.push(instrument);
-            }
+            // Ici on mappe simplement Mt5Symbol -> InstrumentMetadata (MVP).
+            // À affiner selon le schéma réel du bridge.
+            let metadata = InstrumentMetadata {
+                symbol: symbol.symbol.clone(),
+                digits: symbol.digits as u8,
+                point_size: symbol.point_size,
+                volume_min: symbol.volume_min,
+                volume_max: symbol.volume_max,
+                volume_step: symbol.volume_step,
+                contract_size: symbol.contract_size,
+                instrument_type: crate::common::parse::InstrumentType::CurrencyPair {
+                    base_currency: "BASE".to_string(),
+                    quote_currency: "QUOTE".to_string(),
+                },
+            };
+            instruments.push(metadata);
         }
 
         // Cache the instruments
         {
             let mut cache = self.cache.write().await;
-            for instrument in &instruments {
-                cache.insert(instrument.instrument_id().clone(), instrument.clone());
-            }
+            *cache = instruments.clone();
         }
 
-        Ok(instruments)
+        // Convert Vec<InstrumentMetadata> to Vec<Instrument>
+        let instruments_converted: Vec<Instrument> = instruments
+            .into_iter()
+            .map(|metadata| self.create_instrument(&metadata).unwrap())
+            .collect();
+        Ok(instruments_converted)
     }
 
     pub async fn get_instrument(&self, instrument_id: &InstrumentId) -> Option<Instrument> {
         // Check cache first
         {
             let cache = self.cache.read().await;
-            if let Some(instrument) = cache.get(instrument_id) {
-                return Some(instrument.clone());
+            // Since we're dealing with Vec<InstrumentMetadata>, we need to search by symbol
+            for instrument in cache.iter() {
+                if instrument.symbol == instrument_id.symbol {
+                    return Some(self.create_instrument(instrument).unwrap());
+                }
             }
         }
 
         // If not in cache, get from MT5
-        match self.http_client.request_symbol_info(instrument_id.to_string()).await {
+        match self.http_client.get_symbol_info(instrument_id.to_string()).await {
             Ok(symbol) => {
-                let metadata = self.parse_symbol_metadata(&symbol)?;
-                let instrument = self.create_instrument(&metadata)?;
+                let metadata = self.parse_symbol_metadata(&symbol).ok()?;
+                let instrument = self.create_instrument(&metadata).ok()?;
                 
                 // Add to cache
                 {
@@ -151,7 +189,7 @@ impl Mt5InstrumentProvider {
 
         Ok(InstrumentMetadata {
             symbol: symbol.symbol.clone(),
-            digits: symbol.digits,
+            digits: symbol.digits as u8,
             point_size: symbol.point_size,
             volume_min: symbol.volume_min,
             volume_max: symbol.volume_max,
@@ -164,7 +202,7 @@ impl Mt5InstrumentProvider {
     fn create_instrument(&self, metadata: &InstrumentMetadata) -> Result<Instrument, InstrumentProviderError> {
         // Create the appropriate Nautilus instrument based on type
         match &metadata.instrument_type {
-            crate::common::parse::InstrumentType::CurrencyPair { base_currency, quote_currency } => {
+            crate::common::parse::InstrumentType::CurrencyPair { base_currency: _, quote_currency: _ } => {
                 // Create FX currency pair
                 let instrument_id = InstrumentId::from_str(&metadata.symbol).map_err(|e| {
                     InstrumentProviderError::ParseError(format!("Invalid instrument ID: {}", e))
@@ -211,9 +249,14 @@ impl Price {
     pub fn new(value: f64, precision: u8) -> Self {
         Self { value, precision }
     }
+
+    pub fn clone(&self) -> Self {
+        Self { value: self.value, precision: self.precision }
+    }
 }
 
 // Mock implementation for Instrument - this would use the actual Nautilus Instrument
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct Instrument {
     pub instrument_id: InstrumentId,
     pub price: Price,
@@ -245,6 +288,7 @@ impl Instrument {
 }
 
 // Mock implementation for InstrumentId
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct InstrumentId {
     pub symbol: String,
     pub venue: String,

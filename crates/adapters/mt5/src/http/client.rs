@@ -25,21 +25,23 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
 use nautilus_network::http::HttpClient as NautilusHttpClient;
-use nautilus_network::retry::RetryManager;
+
+use std::collections::HashMap;
 
 use crate::common::credential::Mt5Credential;
 use crate::common::urls::Mt5Url;
 use crate::config::Mt5Config;
-use crate::http::query::{AccountInfoParams, SymbolsInfoParams, RatesInfoParams};
 use crate::http::models::{
     Mt5AccountInfo, Mt5Symbol, Mt5Rate, Mt5LoginRequest, Mt5LoginResponse,
     Mt5OrderRequest, Mt5OrderResponse, Mt5Position, Mt5Trade,
 };
-use crate::http::parse::{parse_account_info, parse_symbols, parse_rates};
+use crate::http::parse::{parse_account_info, parse_symbols, parse_rates, parse_single_symbol};
 use thiserror::Error;
 
 #[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
+#[cfg(feature = "python-bindings")]
+use pyo3_async_runtimes::tokio::future_into_py;
 
 #[derive(Debug, Error)]
 pub enum HttpClientError {
@@ -78,6 +80,9 @@ pub enum HttpClientError {
 
     #[error("Timeout error: {0}")]
     TimeoutError(String),
+
+    #[error("Network error: {0}")]
+    NetworkError(String),
 }
 
 impl HttpClientError {
@@ -90,6 +95,7 @@ impl HttpClientError {
                 | HttpClientError::ServerError(_)
                 | HttpClientError::TimeoutError(_)
                 | HttpClientError::RateLimitError(_)
+                | HttpClientError::NetworkError(_)
         )
     }
 
@@ -129,17 +135,15 @@ impl HttpClientError {
     }
 }
 
-// Inner client - contient toute la logique HTTP + état partagé.
-// Utilise NautilusHttpClient pour profiter du rate limiting / retry unifié.
+// Inner client - contains all HTTP logic and state
 pub struct Mt5HttpInnerClient {
     config: Mt5Config,
     credential: Arc<Mutex<Mt5Credential>>,
     url: Mt5Url,
     http_client: NautilusHttpClient,
-    retry_manager: RetryManager<HttpClientError>,
 }
 
-// Outer client - wraps inner with Arc for cheap cloning (needed for Python)
+// Outer client - wraps inner with Arc for efficient cloning (needed for Python)
 #[cfg_attr(feature = "python-bindings", pyclass)]
 pub struct Mt5HttpClient {
     pub(crate) inner: Arc<Mt5HttpInnerClient>,
@@ -147,27 +151,20 @@ pub struct Mt5HttpClient {
 
 impl Mt5HttpInnerClient {
     pub fn new(config: Mt5Config, credential: Mt5Credential, url: Mt5Url) -> Result<Self, HttpClientError> {
-        let timeout = Duration::from_secs(config.http_timeout as u64);
-
-        let mut builder = NautilusHttpClient::builder()
-            .with_timeout(timeout);
-
-        if let Some(proxy_url) = &config.proxy {
-            builder = builder.with_proxy(proxy_url.to_string());
-        }
-
-        let http_client = builder
-            .build()
-            .map_err(|e| HttpClientError::ConnectionError(format!("failed to create HttpClient: {e}")))?;
-
-        let retry_manager = RetryManager::new(|err: &HttpClientError| err.is_retryable());
+        let timeout = Duration::from_secs(config.http_timeout);
+        let http_client = NautilusHttpClient::new(
+            HashMap::new(), // headers
+            Vec::new(),     // user agents
+            Vec::new(),     // quotas
+            None,           // default quota
+            timeout.as_secs(),  // timeout (convert Duration to u64 seconds for the network crate)
+        );
 
         Ok(Self {
             config,
             credential: Arc::new(Mutex::new(credential)),
             url,
             http_client,
-            retry_manager,
         })
     }
 
@@ -191,16 +188,14 @@ impl Mt5HttpInnerClient {
         };
 
         let response = self.http_client
-            .post(&self.url.login_url())
-            .json(&login_request)
-            .send()
+            .post_json(&self.url.login_url(), &login_request)
             .await
-            .map_err(|e| HttpClientError::RequestError(format!("Login request failed: {}", e)))?;
+            .map_err(|e| HttpClientError::NetworkError(e.to_string()))?;
 
-        let status = response.status();
-        if !status.is_success() {
+        let status = response.status().as_u16();
+        if status != 200 {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(HttpClientError::from_http_status(status.as_u16(), error_text));
+            return Err(HttpClientError::from_http_status(status, error_text));
         }
 
         let login_response: Mt5LoginResponse = response
@@ -217,83 +212,64 @@ impl Mt5HttpInnerClient {
     async fn http_get(&self, url: &str) -> Result<String, HttpClientError> {
         let auth = self.get_auth_header().await?;
 
-        self.retry_manager
-            .run(|| async {
-                let response = self.http_client
-                    .get(url)
-                    .with_header("Authorization", auth.clone())
-                    .send()
-                    .await
-                    .map_err(|e| HttpClientError::RequestError(format!("GET {url} failed: {e}")))?;
-
-                let status = response.status();
-                let body = response
-                    .text()
-                    .await
-                    .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
-
-                if !status.is_success() {
-                    return Err(HttpClientError::from_http_status(status.as_u16(), body));
-                }
-
-                Ok(body)
-            })
+        let response = self.http_client
+            .get_json(url, Some(&auth))
             .await
+            .map_err(|e| HttpClientError::NetworkError(e.to_string()))?;
+
+        let status = response.status().as_u16();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
+
+        if status != 200 {
+            return Err(HttpClientError::from_http_status(status, body));
+        }
+
+        Ok(body)
     }
 
     async fn http_post<T: serde::Serialize>(&self, url: &str, body: &T) -> Result<String, HttpClientError> {
         let auth = self.get_auth_header().await?;
 
-        self.retry_manager
-            .run(|| async {
-                let response = self.http_client
-                    .post(url)
-                    .with_header("Authorization", auth.clone())
-                    .json(body)
-                    .send()
-                    .await
-                    .map_err(|e| HttpClientError::RequestError(format!("POST {url} failed: {e}")))?;
-
-                let status = response.status();
-                let body_text = response
-                    .text()
-                    .await
-                    .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
-
-                if !status.is_success() {
-                    return Err(HttpClientError::from_http_status(status.as_u16(), body_text));
-                }
-
-                Ok(body_text)
-            })
+        let response = self.http_client
+            .post_json(url, body)
             .await
+            .map_err(|e| HttpClientError::NetworkError(e.to_string()))?;
+
+        let status = response.status().as_u16();
+        let body_text = response
+            .text()
+            .await
+            .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
+
+        if status != 200 {
+            return Err(HttpClientError::from_http_status(status, body_text));
+        }
+
+        Ok(body_text)
     }
 
     async fn http_delete(&self, url: &str) -> Result<String, HttpClientError> {
         let auth = self.get_auth_header().await?;
 
-        self.retry_manager
-            .run(|| async {
-                let response = self.http_client
-                    .delete(url)
-                    .with_header("Authorization", auth.clone())
-                    .send()
-                    .await
-                    .map_err(|e| HttpClientError::RequestError(format!("DELETE {url} failed: {e}")))?;
-
-                let status = response.status();
-                let body = response
-                    .text()
-                    .await
-                    .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
-
-                if !status.is_success() {
-                    return Err(HttpClientError::from_http_status(status.as_u16(), body));
-                }
-
-                Ok(body)
-            })
+        let response = self.http_client
+            .delete_json(url)
             .await
+            .map_err(|e| HttpClientError::NetworkError(e.to_string()))?;
+
+        let status = response.status().as_u16();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
+
+        if status != 200 {
+            return Err(HttpClientError::from_http_status(status, body));
+        }
+
+        Ok(body)
     }
 
     // High-level domain methods
@@ -510,52 +486,88 @@ impl Mt5HttpClient {
         Self::new(config, credential, url)
     }
     
-    async fn py_login(&self) -> Result<(), HttpClientError> {
-        self.login().await
+    #[pyo3(name = "login")]
+    fn py_login(&self) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.login().await
+        })
     }
     
-    async fn py_get_account_info(&self) -> Result<Mt5AccountInfo, HttpClientError> {
-        self.get_account_info().await
+    #[pyo3(name = "get_account_info")]
+    fn py_get_account_info(&self) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.get_account_info().await
+        })
     }
     
-    async fn py_get_symbols(&self) -> Result<Vec<Mt5Symbol>, HttpClientError> {
-        self.get_symbols().await
+    #[pyo3(name = "get_symbols")]
+    fn py_get_symbols(&self) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.get_symbols().await
+        })
     }
     
-    async fn py_get_rates(&self, symbol: &str) -> Result<Vec<Mt5Rate>, HttpClientError> {
-        self.get_rates(symbol).await
+    #[pyo3(name = "get_rates")]
+    fn py_get_rates(&self, symbol: &str) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.get_rates(symbol).await
+        })
     }
     
-    async fn py_get_symbol_info(&self, symbol: &str) -> Result<Mt5Symbol, HttpClientError> {
-        self.get_symbol_info(symbol).await
+    #[pyo3(name = "get_symbol_info")]
+    fn py_get_symbol_info(&self, symbol: &str) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.get_symbol_info(symbol).await
+        })
     }
     
-    async fn py_get_positions(&self) -> Result<Vec<Mt5Position>, HttpClientError> {
-        self.get_positions().await
+    #[pyo3(name = "get_positions")]
+    fn py_get_positions(&self) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.get_positions().await
+        })
     }
     
-    async fn py_get_trades(&self) -> Result<Vec<Mt5Trade>, HttpClientError> {
-        self.get_trades().await
+    #[pyo3(name = "get_trades")]
+    fn py_get_trades(&self) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.get_trades().await
+        })
     }
     
-    async fn py_get_orders(&self) -> Result<Vec<Mt5OrderResponse>, HttpClientError> {
-        self.get_orders().await
+    #[pyo3(name = "get_orders")]
+    fn py_get_orders(&self) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.get_orders().await
+        })
     }
     
-    async fn py_submit_order(&self, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
-        self.submit_order(order).await
+    #[pyo3(name = "submit_order")]
+    fn py_submit_order(&self, order: Mt5OrderRequest) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.submit_order(order).await
+        })
     }
     
-    async fn py_cancel_order(&self, order_id: u64) -> Result<(), HttpClientError> {
-        self.cancel_order(order_id).await
+    #[pyo3(name = "cancel_order")]
+    fn py_cancel_order(&self, order_id: u64) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.cancel_order(order_id).await
+        })
     }
     
-    async fn py_modify_order(&self, order_id: u64, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
-        self.modify_order(order_id, order).await
+    #[pyo3(name = "modify_order")]
+    fn py_modify_order(&self, order_id: u64, order: Mt5OrderRequest) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.modify_order(order_id, order).await
+        })
     }
     
-    async fn py_get_history(&self, symbol: Option<String>, from: Option<u64>, to: Option<u64>) -> Result<Vec<Mt5Trade>, HttpClientError> {
-        self.get_history(symbol.as_deref(), from, to).await
+    #[pyo3(name = "get_history")]
+    fn py_get_history(&self, symbol: Option<String>, from: Option<u64>, to: Option<u64>) -> PyResult<PyObject> {
+        future_into_py(self.py().unwrap(), async move {
+            self.get_history(symbol.as_deref(), from, to).await
+        })
     }
 }
 
@@ -565,8 +577,6 @@ mod tests {
 
     fn create_test_client() -> Result<Mt5HttpClient, HttpClientError> {
         let config = Mt5Config {
-            api_key: "test_key".to_string(),
-            api_secret: "test_secret".to_string(),
             base_url: "http://localhost:8080".to_string(),
             ws_url: "ws://localhost:8080".to_string(),
             http_timeout: 30,
@@ -594,8 +604,6 @@ mod tests {
     #[test]
     fn test_http_client_with_proxy() {
         let config = Mt5Config {
-            api_key: "test_key".to_string(),
-            api_secret: "test_secret".to_string(),
             base_url: "http://localhost:8080".to_string(),
             ws_url: "ws://localhost:8080".to_string(),
             http_timeout: 30,
@@ -645,8 +653,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -678,8 +684,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -722,8 +726,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -772,8 +774,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -810,8 +810,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -854,8 +852,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -900,8 +896,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -942,8 +936,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -990,8 +982,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -1020,8 +1010,6 @@ mod tests {
         #[tokio::test]
         async fn test_timeout_configuration() {
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: "http://localhost:9999".to_string(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 1,
@@ -1068,8 +1056,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -1112,8 +1098,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,
@@ -1169,8 +1153,6 @@ mod tests {
                 .await;
 
             let config = Mt5Config {
-                api_key: "test_key".to_string(),
-                api_secret: "test_secret".to_string(),
                 base_url: mock_server.uri(),
                 ws_url: "ws://localhost".to_string(),
                 http_timeout: 30,

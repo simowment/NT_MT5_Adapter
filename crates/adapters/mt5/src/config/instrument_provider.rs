@@ -4,13 +4,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mt5InstrumentProviderConfig {
-    pub host: String,
-    pub port: u16,
     pub base_url: String,
-    pub ws_url: String,
-    pub http_timeout: u64,
-    pub ws_timeout: u64,
-    pub credentials: Mt5Credentials,
+    pub ws_url: Option<String>,
+    pub http_timeout: Option<u64>,
+    pub credential: crate::common::credential::Mt5Credential,
     pub filter_currencies: Vec<String>,
     pub filter_indices: Vec<String>,
     pub filter_futures: bool,
@@ -23,13 +20,15 @@ pub struct Mt5InstrumentProviderConfig {
 impl Default for Mt5InstrumentProviderConfig {
     fn default() -> Self {
         Self {
-            host: "localhost".to_string(),
-            port: 8080,
             base_url: "http://localhost:8080".to_string(),
-            ws_url: "ws://localhost:8080".to_string(),
-            http_timeout: 30,
-            ws_timeout: 30,
-            credentials: Mt5Credentials::default(),
+            ws_url: Some("ws://localhost:8080".to_string()),
+            http_timeout: Some(30),
+            credential: crate::common::credential::Mt5Credential::builder()
+                .login("demo")
+                .password("demo")
+                .server("mt5-demo")
+                .build()
+                .unwrap(),
             filter_currencies: vec![
                 "USD".to_string(),
                 "EUR".to_string(),
@@ -55,33 +54,6 @@ impl Default for Mt5InstrumentProviderConfig {
             auto_discover_instruments: true,
             cache_expiry: 300, // 5 minutes
             enable_logging: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Mt5Credentials {
-    pub login: String,
-    pub password: String,
-    pub server: String,
-}
-
-impl Default for Mt5Credentials {
-    fn default() -> Self {
-        Self {
-            login: "".to_string(),
-            password: "".to_string(),
-            server: "".to_string(),
-        }
-    }
-}
-
-impl Mt5Credentials {
-    pub fn new(login: String, password: String, server: String) -> Self {
-        Self {
-            login,
-            password,
-            server,
         }
     }
 }

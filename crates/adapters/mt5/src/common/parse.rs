@@ -1,6 +1,6 @@
 //! Parsing utilities for MetaTrader 5 data.
 
-use chrono::{DateTime, Utc, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -53,8 +53,7 @@ pub fn extract_i64_field(obj: &Value, field: &str) -> Result<i64, ParseError> {
 
 /// Parse MT5 timestamp (seconds since epoch) to DateTime<Utc>
 pub fn parse_mt5_timestamp(timestamp: i64) -> Result<DateTime<Utc>, ParseError> {
-    NaiveDateTime::from_timestamp_opt(timestamp, 0)
-        .and_then(|naive| Utc.from_local_datetime(&naive).single())
+    DateTime::from_timestamp(timestamp, 0)
         .ok_or_else(|| ParseError::InvalidTimestamp(timestamp.to_string()))
 }
 
@@ -169,6 +168,7 @@ pub struct InstrumentMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Datelike;
     use serde_json::json;
 
     #[test]

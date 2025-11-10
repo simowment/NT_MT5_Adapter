@@ -15,27 +15,19 @@
 
 """
 The data client for the MetaTrader 5 integration.
-
 """
 
 
-from nautilus_trader.cache.cache import Cache
-from nautilus_trader.common.component import LiveClock
-from nautilus_trader.common.component import MessageBus
 from nautilus_trader.core.correctness import PyCondition
 from nautilus_trader.live.data_client import LiveMarketDataClient
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.data import DataType
-from nautilus_trader.model.data import InstrumentStatusUpdate
-from nautilus_trader.model.data import QuoteTick
-from nautilus_trader.model.data import TradeTick
-from nautilus_trader.model.identifiers import ClientId
-from nautilus_trader.model.identifiers import InstrumentId
+from nautilus_trader.model.identifiers import ClientId, InstrumentId
 
 # Import pour gestion d'erreurs MT5
 import traceback
 import logging
-from typing import Optional, Union
+from typing import Optional
 
 
 class Mt5DataError(Exception):
@@ -65,7 +57,7 @@ class Mt5ParsingError(Mt5DataError):
 
 class Mt5DataClient(LiveMarketDataClient):
     """
-    MetaTrader 5 market data client (skeleton).
+    MetaTrader 5 market data client.
 
     This class is wired to fit the NautilusTrader LiveMarketDataClient interface
     and should delegate to the Rust MT5 HTTP/WS clients exposed via PyO3.
@@ -100,7 +92,7 @@ class Mt5DataClient(LiveMarketDataClient):
             log_level = logging.INFO
             
         # Ajouter un handler spécialisé pour MT5
-        mt5_logger = logging.getLogger(f"nautilus_trader.adapters.mt5.data")
+        mt5_logger = logging.getLogger("nautilus_trader.adapters.mt5.data")
         if not mt5_logger.handlers:
             handler = logging.StreamHandler()
             formatter = logging.Formatter(
@@ -202,8 +194,7 @@ class Mt5DataClient(LiveMarketDataClient):
             else:
                 self._log.warning("Not connected to MT5 WebSocket")
         except Exception as e:
-            self._log.error(f"Failed to subscribe to trade ticks for {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"subscribe_trade_ticks for {instrument_id}")
 
     async def _subscribe_quote_ticks(self, instrument_id: InstrumentId):
         self._log.info(f"Subscribing to quote ticks for {instrument_id}")
@@ -215,8 +206,7 @@ class Mt5DataClient(LiveMarketDataClient):
             else:
                 self._log.warning("Not connected to MT5 WebSocket")
         except Exception as e:
-            self._log.error(f"Failed to subscribe to quote ticks for {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"subscribe_quote_ticks for {instrument_id}")
 
     async def _subscribe_bars(self, bar_type: BarType):
         self._log.info(f"Subscribing to bars for {bar_type}")
@@ -229,8 +219,7 @@ class Mt5DataClient(LiveMarketDataClient):
             else:
                 self._log.warning("Not connected to MT5 WebSocket")
         except Exception as e:
-            self._log.error(f"Failed to subscribe to bars for {bar_type}: {e}")
-            raise
+            self._handle_mt5_error(e, f"subscribe_bars for {bar_type}")
 
     async def _unsubscribe_trade_ticks(self, instrument_id: InstrumentId):
         self._log.info(f"Unsubscribing from trade ticks for {instrument_id}")
@@ -242,8 +231,7 @@ class Mt5DataClient(LiveMarketDataClient):
             else:
                 self._log.warning("Not connected to MT5 WebSocket")
         except Exception as e:
-            self._log.error(f"Failed to unsubscribe from trade ticks for {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"unsubscribe_trade_ticks for {instrument_id}")
 
     async def _unsubscribe_quote_ticks(self, instrument_id: InstrumentId):
         self._log.info(f"Unsubscribing from quote ticks for {instrument_id}")
@@ -255,8 +243,7 @@ class Mt5DataClient(LiveMarketDataClient):
             else:
                 self._log.warning("Not connected to MT5 WebSocket")
         except Exception as e:
-            self._log.error(f"Failed to unsubscribe from quote ticks for {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"unsubscribe_quote_ticks for {instrument_id}")
 
     async def _unsubscribe_bars(self, bar_type: BarType):
         self._log.info(f"Unsubscribing from bars for {bar_type}")
@@ -268,8 +255,7 @@ class Mt5DataClient(LiveMarketDataClient):
             else:
                 self._log.warning("Not connected to MT5 WebSocket")
         except Exception as e:
-            self._log.error(f"Failed to unsubscribe from bars for {bar_type}: {e}")
-            raise
+            self._handle_mt5_error(e, f"unsubscribe_bars for {bar_type}")
 
     async def _request_data(self, data_type: DataType, correlation_id: str, start: object = None, end: object = None):
         self._log.info(f"Requesting data: {data_type}")
@@ -306,8 +292,7 @@ class Mt5DataClient(LiveMarketDataClient):
             else:
                 self._log.warning(f"Unsupported data type: {data_type.type_name}")
         except Exception as e:
-            self._log.error(f"Failed to request data {data_type}: {e}")
-            raise
+            self._handle_mt5_error(e, f"request_data for {data_type}")
 
     async def _subscribe_instrument_status(self, instrument_id: InstrumentId):
         self._log.info(f"Subscribing to instrument status for {instrument_id}")
@@ -320,8 +305,7 @@ class Mt5DataClient(LiveMarketDataClient):
             else:
                 self._log.warning("Not connected to MT5 WebSocket")
         except Exception as e:
-            self._log.error(f"Failed to subscribe to instrument status for {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"subscribe_instrument_status for {instrument_id}")
 
     async def _subscribe_instrument_close(self, instrument_id: InstrumentId):
         self._log.info(f"Subscribing to instrument close for {instrument_id}")
@@ -334,8 +318,7 @@ class Mt5DataClient(LiveMarketDataClient):
             else:
                 self._log.warning("Not connected to MT5 WebSocket")
         except Exception as e:
-            self._log.error(f"Failed to subscribe to instrument close for {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"subscribe_instrument_close for {instrument_id}")
 
     async def _request_instrument(self, instrument_id: InstrumentId, correlation_id: str, start: object = None, end: object = None):
         self._log.info(f"Requesting instrument: {instrument_id}")
@@ -353,8 +336,7 @@ class Mt5DataClient(LiveMarketDataClient):
             self._log.info(f"Received instrument info for {symbol}")
             
         except Exception as e:
-            self._log.error(f"Failed to request instrument {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"request_instrument for {instrument_id}")
 
     async def _request_quote_ticks(self, instrument_id: InstrumentId, limit: int, correlation_id: str, start: object = None, end: object = None):
         self._log.info(f"Requesting quote ticks for {instrument_id}")
@@ -377,8 +359,7 @@ class Mt5DataClient(LiveMarketDataClient):
                 pass
                 
         except Exception as e:
-            self._log.error(f"Failed to request quote ticks for {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"request_quote_ticks for {instrument_id}")
 
     async def _request_trade_ticks(self, instrument_id: InstrumentId, limit: int, correlation_id: str, start: object = None, end: object = None):
         self._log.info(f"Requesting trade ticks for {instrument_id}")
@@ -402,8 +383,7 @@ class Mt5DataClient(LiveMarketDataClient):
                 pass
                 
         except Exception as e:
-            self._log.error(f"Failed to request trade ticks for {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"request_trade_ticks for {instrument_id}")
 
     async def _request_bars(self, bar_type: BarType, limit: int, correlation_id: str, start: object = None, end: object = None):
         self._log.info(f"Requesting bars for {bar_type}")
@@ -425,8 +405,7 @@ class Mt5DataClient(LiveMarketDataClient):
                 pass
                 
         except Exception as e:
-            self._log.error(f"Failed to request bars for {bar_type}: {e}")
-            raise
+            self._handle_mt5_error(e, f"request_bars for {bar_type}")
 
     async def _request_order_book_snapshot(self, instrument_id: InstrumentId, correlation_id: str, start: object = None, end: object = None):
         self._log.info(f"Requesting order book snapshot for {instrument_id}")
@@ -441,5 +420,4 @@ class Mt5DataClient(LiveMarketDataClient):
             self._log.info(f"Order book snapshot requested for {symbol}")
             
         except Exception as e:
-            self._log.error(f"Failed to request order book snapshot for {instrument_id}: {e}")
-            raise
+            self._handle_mt5_error(e, f"request_order_book_snapshot for {instrument_id}")
