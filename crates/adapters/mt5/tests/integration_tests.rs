@@ -15,8 +15,6 @@ fn test_http_client_initialization() {
 
     let url = Mt5Url::new("http://localhost:8080");
     let config = Mt5Config {
-        api_key: "test_key".to_string(),
-        api_secret: "test_secret".to_string(),
         base_url: "http://localhost:8080".to_string(),
         ws_url: "ws://localhost:8080".to_string(),
         http_timeout: 30,

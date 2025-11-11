@@ -1,9 +1,11 @@
 pub mod client;
+pub mod error;
 pub mod models;
-pub mod query;
 pub mod parse;
+pub mod query;
 
-pub use client::*;
+pub use client::Mt5HttpClient;
+pub use error::*;
 pub use models::*;
-pub use query::*;
 pub use parse::*;
+pub use query::*;

@@ -1,7 +1,8 @@
 //! MT5 Instrument Provider implementation.
 
 use crate::config::{Mt5Config, Mt5InstrumentProviderConfig};
-use crate::http::client::{Mt5HttpClient, HttpClientError};
+use crate::http::client::Mt5HttpClient;
+use crate::http::error::{Mt5HttpError};
 use crate::common::parse::InstrumentMetadata;
 use crate::common::credential::Mt5Credential;
 use crate::common::urls::Mt5Url;
@@ -20,7 +21,7 @@ pub enum InstrumentProviderError {
     #[error("Configuration error: {0}")]
     ConfigError(String),
     #[error("HTTP client error: {0}")]
-    HttpClient(#[from] HttpClientError),
+    HttpClient(#[from] Mt5HttpError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -30,6 +31,9 @@ impl From<String> for InstrumentProviderError {
         InstrumentProviderError::ParseError(s)
     }
 }
+
+// Remove the problematic conversion implementation
+// We'll handle the error conversion differently
 
 pub struct Mt5InstrumentProvider {
     config: Mt5InstrumentProviderConfig,
@@ -57,7 +61,12 @@ impl Mt5InstrumentProvider {
         };
 
         let url = Mt5Url::new(&http_config.base_url);
-        let http_client = Arc::new(Mt5HttpClient::new(http_config, cred, url)?);
+        let http_client_result = Mt5HttpClient::new(http_config, cred, url);
+        let http_client = match http_client_result {
+            Ok(client) => client,
+            Err(e) => return Err(InstrumentProviderError::ConnectionError(e.to_string())),
+        };
+        let http_client = Arc::new(http_client);
 
         Ok(Self {
             config,
@@ -101,8 +110,8 @@ impl Mt5InstrumentProvider {
         // Convert Vec<InstrumentMetadata> to Vec<Instrument>
         let instruments_converted: Vec<Instrument> = instruments
             .into_iter()
-            .map(|metadata| self.create_instrument(&metadata).unwrap())
-            .collect();
+            .map(|metadata| self.create_instrument(&metadata))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(instruments_converted)
     }
 
@@ -119,21 +128,21 @@ impl Mt5InstrumentProvider {
         }
 
         // If not in cache, get from MT5
-        match self.http_client.get_symbol_info(instrument_id.to_string()).await {
-            Ok(symbol) => {
-                let metadata = self.parse_symbol_metadata(&symbol).ok()?;
-                let instrument = self.create_instrument(&metadata).ok()?;
-                
-                // Add to cache
-                {
-                    let mut cache = self.cache.write().await;
-                    cache.insert(instrument_id.clone(), instrument.clone());
+        if let Ok(symbol) = self.http_client.get_symbol_info(&instrument_id.to_string()).await {
+            if let Ok(metadata) = self.parse_symbol_metadata(&symbol) {
+                if let Ok(instrument) = self.create_instrument(&metadata) {
+                    // Add to cache
+                    {
+                        let mut cache = self.cache.write().await;
+                        // Since cache is Vec<InstrumentMetadata>, we need to push the metadata instead of the instrument
+                        cache.push(metadata.clone());
+                    }
+                    
+                    return Some(instrument);
                 }
-                
-                Some(instrument)
             }
-            Err(_) => None,
         }
+        None
     }
 
     pub async fn load_instruments(&self) -> Result<(), InstrumentProviderError> {
@@ -240,6 +249,7 @@ impl Mt5InstrumentProvider {
 }
 
 // Mock implementation for Price::new - this would need the actual Nautilus types
+#[derive(Debug, Clone, PartialEq)]
 pub struct Price {
     pub value: f64,
     pub precision: u8,
@@ -249,14 +259,10 @@ impl Price {
     pub fn new(value: f64, precision: u8) -> Self {
         Self { value, precision }
     }
-
-    pub fn clone(&self) -> Self {
-        Self { value: self.value, precision: self.precision }
-    }
 }
 
 // Mock implementation for Instrument - this would use the actual Nautilus Instrument
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Instrument {
     pub instrument_id: InstrumentId,
     pub price: Price,

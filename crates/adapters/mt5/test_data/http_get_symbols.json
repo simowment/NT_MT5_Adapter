@@ -1,0 +1,38 @@
+[
+  {
+    "symbol": "EURUSD",
+    "digits": 5,
+    "pointSize": 0.00001,
+    "volumeMin": 0.01,
+    "volumeMax": 100.0,
+    "volumeStep": 0.01,
+    "contractSize": 10000.0,
+    "marginInitial": 0.03,
+    "marginMaintenance": 0.03,
+    "type": "forex"
+  },
+  {
+    "symbol": "GBPUSD",
+    "digits": 5,
+    "pointSize": 0.00001,
+    "volumeMin": 0.01,
+    "volumeMax": 100.0,
+    "volumeStep": 0.01,
+    "contractSize": 100000.0,
+    "marginInitial": 0.03,
+    "marginMaintenance": 0.03,
+    "type": "forex"
+  },
+  {
+    "symbol": "USDJPY",
+    "digits": 3,
+    "pointSize": 0.01,
+    "volumeMin": 0.01,
+    "volumeMax": 100.0,
+    "volumeStep": 0.01,
+    "contractSize": 10000.0,
+    "marginInitial": 0.03,
+    "marginMaintenance": 0.03,
+    "type": "forex"
+  }
+]

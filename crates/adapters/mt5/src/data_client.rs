@@ -19,7 +19,8 @@
 //! providing market data functionality including subscriptions and requests.
 
 use crate::config::{Mt5Config, Mt5DataClientConfig};
-use crate::http::client::{Mt5HttpClient, HttpClientError};
+use crate::http::client::Mt5HttpClient;
+use crate::http::error::Mt5HttpError as HttpClientError;
 use crate::common::urls::Mt5Url;
 use crate::common::credential::Mt5Credential;
 use std::sync::Arc;
@@ -66,19 +67,19 @@ impl Mt5DataClient {
         };
 
         let url = Mt5Url::new(&http_config.base_url);
-        let http_client = Arc::new(Mt5HttpClient::new(http_config, cred, url)?);
+        let http_client = Arc::new(Mt5HttpClient::new(http_config, cred, url).map_err(|e| DataClientError::ConnectionError(e.to_string()))?);
 
         Ok(Self { config, http_client })
     }
 
     /// Performs a login to validate connectivity with the MT5 bridge.
     pub async fn connect(&self) -> Result<(), DataClientError> {
-        self.http_client.login().await.map_err(DataClientError::from)
+        self.http_client.login().await.map_err(|e| DataClientError::ConnectionError(e.to_string()))
     }
 
     /// Fetches all symbols from the MT5 bridge.
     pub async fn get_symbols(&self) -> Result<Vec<crate::http::models::Mt5Symbol>, DataClientError> {
-        let symbols = self.http_client.get_symbols().await?;
+        let symbols = self.http_client.get_symbols().await.map_err(|e| DataClientError::ConnectionError(e.to_string()))?;
         Ok(symbols)
     }
 }

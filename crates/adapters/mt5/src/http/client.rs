@@ -13,30 +13,30 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-//! HTTP client implementation for MetaTrader 5 REST API.
-//!
-//! This module implements the inner/outer client pattern with Arc wrapping
-//! for efficient cloning in Python bindings while keeping HTTP logic centralized.
-
-use std::sync::Arc;
-use std::time::Duration;
-
-use tokio::sync::Mutex;
-use tracing::{debug, error, info};
-
-use nautilus_network::http::HttpClient as NautilusHttpClient;
-
-use std::collections::HashMap;
-
-use crate::common::credential::Mt5Credential;
-use crate::common::urls::Mt5Url;
-use crate::config::Mt5Config;
-use crate::http::models::{
-    Mt5AccountInfo, Mt5Symbol, Mt5Rate, Mt5LoginRequest, Mt5LoginResponse,
-    Mt5OrderRequest, Mt5OrderResponse, Mt5Position, Mt5Trade,
-};
-use crate::http::parse::{parse_account_info, parse_symbols, parse_rates, parse_single_symbol};
-use thiserror::Error;
+  //! HTTP client implementation for MetaTrader 5 REST API.
+  //!
+  //! Inner/outer client inspiré du pattern BitMEX:
+  //! - Mt5RawHttpClient: gère HttpClient Nautilus + appels REST MT5
+  //! - Mt5HttpClient: wrapper clonable (Python-friendly) qui délègue
+ 
+ use std::{
+     collections::HashMap,
+     sync::Arc,
+ };
+ 
+ use nautilus_network::http::{HttpClient, HttpClientError};
+ use tokio::sync::Mutex;
+ use tracing::error;
+ 
+ use crate::common::credential::Mt5Credential;
+ use crate::common::urls::Mt5Url;
+ use crate::config::Mt5Config;
+ use crate::http::models::{
+     Mt5AccountInfo, Mt5Symbol, Mt5Rate, Mt5LoginRequest, Mt5LoginResponse,
+     Mt5OrderRequest, Mt5OrderResponse, Mt5Position, Mt5Trade,
+ };
+ use crate::http::parse::{parse_account_info, parse_symbols, parse_rates, parse_single_symbol};
+ use thiserror::Error;
 
 #[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
@@ -44,7 +44,7 @@ use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
 
 #[derive(Debug, Error)]
-pub enum HttpClientError {
+pub enum Mt5HttpError {
     #[error("Connection error: {0}")]
     ConnectionError(String),
 
@@ -85,17 +85,17 @@ pub enum HttpClientError {
     NetworkError(String),
 }
 
-impl HttpClientError {
+impl Mt5HttpError {
     /// Determines if the error is retryable
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            HttpClientError::ConnectionError(_)
-                | HttpClientError::RequestError(_)
-                | HttpClientError::ServerError(_)
-                | HttpClientError::TimeoutError(_)
-                | HttpClientError::RateLimitError(_)
-                | HttpClientError::NetworkError(_)
+            Mt5HttpError::ConnectionError(_)
+                | Mt5HttpError::RequestError(_)
+                | Mt5HttpError::ServerError(_)
+                | Mt5HttpError::TimeoutError(_)
+                | Mt5HttpError::RateLimitError(_)
+                | Mt5HttpError::NetworkError(_)
         )
     }
 
@@ -103,12 +103,12 @@ impl HttpClientError {
     pub fn is_non_retryable(&self) -> bool {
         matches!(
             self,
-            HttpClientError::AuthenticationError(_)
-                | HttpClientError::AuthorizationError(_)
-                | HttpClientError::InvalidRequestError(_)
-                | HttpClientError::NotFoundError(_)
-                | HttpClientError::JsonDecodeError(_)
-                | HttpClientError::ParseError(_)
+            Mt5HttpError::AuthenticationError(_)
+                | Mt5HttpError::AuthorizationError(_)
+                | Mt5HttpError::InvalidRequestError(_)
+                | Mt5HttpError::NotFoundError(_)
+                | Mt5HttpError::JsonDecodeError(_)
+                | Mt5HttpError::ParseError(_)
         )
     }
 
@@ -116,92 +116,108 @@ impl HttpClientError {
     pub fn is_fatal(&self) -> bool {
         matches!(
             self,
-            HttpClientError::AuthenticationError(_)
-                | HttpClientError::AuthorizationError(_)
+            Mt5HttpError::AuthenticationError(_)
+                | Mt5HttpError::AuthorizationError(_)
         )
     }
 
     /// Maps HTTP status codes to appropriate error variants
     pub fn from_http_status(status: u16, message: String) -> Self {
         match status {
-            400 => HttpClientError::InvalidRequestError(message),
-            401 => HttpClientError::AuthenticationError(message),
-            403 => HttpClientError::AuthorizationError(message),
-            404 => HttpClientError::NotFoundError(message),
-            429 => HttpClientError::RateLimitError(message),
-            500..=599 => HttpClientError::ServerError(message),
-            _ => HttpClientError::HttpError(status, message),
+            400 => Mt5HttpError::InvalidRequestError(message),
+            401 => Mt5HttpError::AuthenticationError(message),
+            403 => Mt5HttpError::AuthorizationError(message),
+            404 => Mt5HttpError::NotFoundError(message),
+            429 => Mt5HttpError::RateLimitError(message),
+            500..=599 => Mt5HttpError::ServerError(message),
+            _ => Mt5HttpError::HttpError(status, message),
         }
     }
 }
 
-// Inner client - contains all HTTP logic and state
-pub struct Mt5HttpInnerClient {
-    config: Mt5Config,
+// Low-level MT5 HTTP client (inner)
+pub struct Mt5RawHttpClient {
+    base_url: String,
+    client: HttpClient,
     credential: Arc<Mutex<Mt5Credential>>,
-    url: Mt5Url,
-    http_client: NautilusHttpClient,
 }
 
-// Outer client - wraps inner with Arc for efficient cloning (needed for Python)
 #[cfg_attr(feature = "python-bindings", pyclass)]
 pub struct Mt5HttpClient {
-    pub(crate) inner: Arc<Mt5HttpInnerClient>,
+    inner: Arc<Mt5RawHttpClient>,
 }
 
-impl Mt5HttpInnerClient {
-    pub fn new(config: Mt5Config, credential: Mt5Credential, url: Mt5Url) -> Result<Self, HttpClientError> {
-        let timeout = Duration::from_secs(config.http_timeout);
-        let http_client = NautilusHttpClient::new(
-            HashMap::new(), // headers
-            Vec::new(),     // user agents
-            Vec::new(),     // quotas
-            None,           // default quota
-            timeout.as_secs(),  // timeout (convert Duration to u64 seconds for the network crate)
+impl Mt5RawHttpClient {
+    pub fn new(config: Mt5Config, credential: Mt5Credential, url: Mt5Url) -> Result<Self, Mt5HttpError> {
+        let mut headers = HashMap::new();
+        headers.insert("User-Agent".to_string(), "nautilus-mt5-adapter".to_string());
+
+        // HttpClient::new signature (0.51.0):
+        // new(default_headers, header_keys, keyed_quotas, default_quota, timeout_secs)
+        let client = HttpClient::new(
+            headers,
+            Vec::new(),
+            Vec::new(),
+            None,
+            Some(config.http_timeout as u64),
         );
 
         Ok(Self {
-            config,
+            base_url: url.base_url().to_string(),
+            client,
             credential: Arc::new(Mutex::new(credential)),
-            url,
-            http_client,
         })
     }
 
-    async fn get_auth_header(&self) -> Result<String, HttpClientError> {
+    async fn get_auth_header(&self) -> Result<String, Mt5HttpError> {
         let cred = self.credential.lock().await;
-        
+
         if let Some(token) = &cred.token {
             Ok(format!("Bearer {}", token))
         } else {
-            Err(HttpClientError::AuthenticationError("No authentication token available".to_string()))
+            Err(Mt5HttpError::AuthenticationError(
+                "No authentication token available".to_string(),
+            ))
         }
     }
 
-    pub async fn login(&self) -> Result<(), HttpClientError> {
+    pub async fn login(&self) -> Result<(), Mt5HttpError> {
         let cred = self.credential.lock().await.clone();
-        
+
         let login_request = Mt5LoginRequest {
-            login: cred.login.clone(),
-            password: cred.password.clone(),
-            server: cred.server.clone(),
+            login: cred.login,
+            password: cred.password,
+            server: cred.server,
         };
 
-        let response = self.http_client
-            .post_json(&self.url.login_url(), &login_request)
-            .await
-            .map_err(|e| HttpClientError::NetworkError(e.to_string()))?;
+        let url = format!("{}/api/login", self.base_url);
+        let body = serde_json::to_vec(&login_request)
+            .map_err(|e| Mt5HttpError::JsonDecodeError(e.to_string()))?;
 
-        let status = response.status().as_u16();
+        // HttpClient::request(method, url, headers, body, timeout_ms, rate_keys)
+        let resp = self.client
+            .request(
+                reqwest::Method::POST,
+                url,
+                Some(HashMap::from([(
+                    "Content-Type".to_string(),
+                    "application/json".to_string(),
+                )])),
+                Some(body),
+                None,
+                None,
+            )
+            .await
+            .map_err(|e| Mt5HttpError::NetworkError(e.to_string()))?;
+
+        let status = resp.status.as_u16();
         if status != 200 {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(HttpClientError::from_http_status(status, error_text));
+            let text = String::from_utf8_lossy(&resp.body).to_string();
+            return Err(Mt5HttpError::from_http_status(status, text));
         }
 
-        let login_response: Mt5LoginResponse = response
-            .json()
-            .await
-            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse login response: {}", e)))?;
+        let login_response: Mt5LoginResponse = serde_json::from_slice(&resp.body)
+            .map_err(|e| Mt5HttpError::JsonDecodeError(e.to_string()))?;
 
         let mut cred_mut = self.credential.lock().await;
         cred_mut.token = Some(login_response.token);
@@ -209,64 +225,87 @@ impl Mt5HttpInnerClient {
         Ok(())
     }
 
-    async fn http_get(&self, url: &str) -> Result<String, HttpClientError> {
+    async fn http_get(&self, url: &str) -> Result<String, Mt5HttpError> {
         let auth = self.get_auth_header().await?;
 
-        let response = self.http_client
-            .get_json(url, Some(&auth))
+        let resp = self.client
+            .request(
+                reqwest::Method::GET,
+                url.to_string(),
+                Some(HashMap::from([(
+                    "Authorization".to_string(),
+                    auth,
+                )])),
+                None,
+                None,
+                None,
+            )
             .await
-            .map_err(|e| HttpClientError::NetworkError(e.to_string()))?;
+            .map_err(|e| Mt5HttpError::NetworkError(e.to_string()))?;
 
-        let status = response.status().as_u16();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
+        let status = resp.status.as_u16();
+        let body = String::from_utf8_lossy(&resp.body).to_string();
 
         if status != 200 {
-            return Err(HttpClientError::from_http_status(status, body));
+            return Err(Mt5HttpError::from_http_status(status, body));
         }
 
         Ok(body)
     }
 
-    async fn http_post<T: serde::Serialize>(&self, url: &str, body: &T) -> Result<String, HttpClientError> {
+    async fn http_post<T: serde::Serialize>(&self, url: &str, body: &T) -> Result<String, Mt5HttpError> {
         let auth = self.get_auth_header().await?;
+        let body_bytes = serde_json::to_vec(body)
+            .map_err(|e| Mt5HttpError::JsonDecodeError(e.to_string()))?;
 
-        let response = self.http_client
-            .post_json(url, body)
+        let resp = self.client
+            .request(
+                reqwest::Method::POST,
+                url.to_string(),
+                Some(HashMap::from([
+                    ("Authorization".to_string(), auth),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ])),
+                Some(body_bytes),
+                None,
+                None,
+            )
             .await
-            .map_err(|e| HttpClientError::NetworkError(e.to_string()))?;
+            .map_err(|e| Mt5HttpError::NetworkError(e.to_string()))?;
 
-        let status = response.status().as_u16();
-        let body_text = response
-            .text()
-            .await
-            .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
+        let status = resp.status.as_u16();
+        let text = String::from_utf8_lossy(&resp.body).to_string();
 
         if status != 200 {
-            return Err(HttpClientError::from_http_status(status, body_text));
+            return Err(Mt5HttpError::from_http_status(status, text));
         }
 
-        Ok(body_text)
+        Ok(text)
     }
 
-    async fn http_delete(&self, url: &str) -> Result<String, HttpClientError> {
+    async fn http_delete(&self, url: &str) -> Result<String, Mt5HttpError> {
         let auth = self.get_auth_header().await?;
 
-        let response = self.http_client
-            .delete_json(url)
+        let resp = self.client
+            .request(
+                reqwest::Method::DELETE,
+                url.to_string(),
+                Some(HashMap::from([(
+                    "Authorization".to_string(),
+                    auth,
+                )])),
+                None,
+                None,
+                None,
+            )
             .await
-            .map_err(|e| HttpClientError::NetworkError(e.to_string()))?;
+            .map_err(|e| Mt5HttpError::NetworkError(e.to_string()))?;
 
-        let status = response.status().as_u16();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| HttpClientError::RequestError(format!("read body failed: {e}")))?;
+        let status = resp.status.as_u16();
+        let body = String::from_utf8_lossy(&resp.body).to_string();
 
         if status != 200 {
-            return Err(HttpClientError::from_http_status(status, body));
+            return Err(Mt5HttpError::from_http_status(status, body));
         }
 
         Ok(body)
@@ -276,56 +315,60 @@ impl Mt5HttpInnerClient {
     
     // HTTP low-level API calls (prefixed with http_)
     
-    pub async fn http_get_account_info(&self) -> Result<String, HttpClientError> {
-        let response = self.http_get(&self.url.account_info_url()).await?;
-        Ok(response)
+    pub async fn http_get_account_info(&self) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/account", self.base_url);
+        self.http_get(&url).await
     }
 
-    pub async fn http_get_symbols(&self) -> Result<String, HttpClientError> {
-        let response = self.http_get(&self.url.symbols_url()).await?;
-        Ok(response)
+    pub async fn http_get_symbols(&self) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/symbols", self.base_url);
+        self.http_get(&url).await
     }
 
-    pub async fn http_get_symbol_info(&self, symbol: &str) -> Result<String, HttpClientError> {
-        let response = self.http_get(&self.url.symbol_info_url(symbol)).await?;
-        Ok(response)
+    pub async fn http_get_symbol_info(&self, symbol: &str) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/symbols/{}", self.base_url, symbol);
+        self.http_get(&url).await
     }
 
-    pub async fn http_get_rates(&self, symbol: &str) -> Result<String, HttpClientError> {
-        let url = format!("{}?symbol={}", self.url.rates_url(), symbol);
-        let response = self.http_get(&url).await?;
-        Ok(response)
+    pub async fn http_get_rates(&self, symbol: &str) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/rates?symbol={}", self.base_url, symbol);
+        self.http_get(&url).await
     }
 
-    pub async fn http_get_positions(&self) -> Result<String, HttpClientError> {
-        let response = self.http_get(&self.url.positions_url()).await?;
-        Ok(response)
+    pub async fn http_get_positions(&self) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/positions", self.base_url);
+        self.http_get(&url).await
     }
 
-    pub async fn http_get_trades(&self) -> Result<String, HttpClientError> {
-        let response = self.http_get(&self.url.trades_url()).await?;
-        Ok(response)
+    pub async fn http_get_trades(&self) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/trades", self.base_url);
+        self.http_get(&url).await
     }
 
-    pub async fn http_get_orders(&self) -> Result<String, HttpClientError> {
-        let response = self.http_get(&self.url.orders_url()).await?;
-        Ok(response)
+    pub async fn http_get_orders(&self) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/orders", self.base_url);
+        self.http_get(&url).await
     }
 
-    pub async fn http_submit_order(&self, order: &Mt5OrderRequest) -> Result<String, HttpClientError> {
-        let response = self.http_post(&self.url.orders_url(), order).await?;
-        Ok(response)
+    pub async fn http_submit_order(&self, order: &Mt5OrderRequest) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/orders", self.base_url);
+        self.http_post(&url, order).await
     }
 
-    pub async fn http_cancel_order(&self, order_id: u64) -> Result<String, HttpClientError> {
-        let response = self.http_delete(&self.url.orders_by_id_url(order_id)).await?;
-        Ok(response)
+    pub async fn http_cancel_order(&self, order_id: u64) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/orders/{}", self.base_url, order_id);
+        self.http_delete(&url).await
     }
 
-    pub async fn http_get_history(&self, symbol: Option<&str>, from: Option<u64>, to: Option<u64>) -> Result<String, HttpClientError> {
-        let mut url = self.url.history_url();
+    pub async fn http_get_history(
+        &self,
+        symbol: Option<&str>,
+        from: Option<u64>,
+        to: Option<u64>,
+    ) -> Result<String, Mt5HttpError> {
+        let mut url = format!("{}/api/history", self.base_url);
         let mut params = Vec::new();
-        
+
         if let Some(symbol) = symbol {
             params.push(format!("symbol={}", symbol));
         }
@@ -335,145 +378,143 @@ impl Mt5HttpInnerClient {
         if let Some(to) = to {
             params.push(format!("to={}", to));
         }
-        
+
         if !params.is_empty() {
             url.push('?');
             url.push_str(&params.join("&"));
         }
-        
-        let response = self.http_get(&url).await?;
-        Ok(response)
+
+        self.http_get(&url).await
     }
 
-    pub async fn http_modify_order(&self, order_id: u64, order: &Mt5OrderRequest) -> Result<String, HttpClientError> {
-        let url = self.url.orders_by_id_url(order_id);
-        let response = self.http_post(&url, order).await?;
-        Ok(response)
+    pub async fn http_modify_order(&self, order_id: u64, order: &Mt5OrderRequest) -> Result<String, Mt5HttpError> {
+        let url = format!("{}/api/orders/{}", self.base_url, order_id);
+        self.http_post(&url, order).await
     }
 
     // High-level domain methods (no prefix)
     
-    pub async fn get_account_info(&self) -> Result<Mt5AccountInfo, HttpClientError> {
+    pub async fn get_account_info(&self) -> Result<Mt5AccountInfo, Mt5HttpError> {
         let response = self.http_get_account_info().await?;
-        parse_account_info(&response).map_err(|e| HttpClientError::ParseError(e.to_string()))
+        parse_account_info(&response).map_err(|e| Mt5HttpError::ParseError(e.to_string()))
     }
 
-    pub async fn get_symbols(&self) -> Result<Vec<Mt5Symbol>, HttpClientError> {
+    pub async fn get_symbols(&self) -> Result<Vec<Mt5Symbol>, Mt5HttpError> {
         let response = self.http_get_symbols().await?;
-        parse_symbols(&response).map_err(|e| HttpClientError::ParseError(e.to_string()))
+        parse_symbols(&response).map_err(|e| Mt5HttpError::ParseError(e.to_string()))
     }
 
-    pub async fn get_symbol_info(&self, symbol: &str) -> Result<Mt5Symbol, HttpClientError> {
+    pub async fn get_symbol_info(&self, symbol: &str) -> Result<Mt5Symbol, Mt5HttpError> {
         let response = self.http_get_symbol_info(symbol).await?;
         // For single symbol info, we parse it as a single object rather than array
         let value: serde_json::Value = serde_json::from_str(&response)
-            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse symbol info: {}", e)))?;
+            .map_err(|e| Mt5HttpError::JsonDecodeError(format!("Failed to parse symbol info: {}", e)))?;
         
         // Parse the single symbol object using the same logic as parse_symbols
-        parse_single_symbol(&value).map_err(|e| HttpClientError::ParseError(e.to_string()))
+        parse_single_symbol(&value).map_err(|e| Mt5HttpError::ParseError(e.to_string()))
     }
 
-    pub async fn get_rates(&self, symbol: &str) -> Result<Vec<Mt5Rate>, HttpClientError> {
+    pub async fn get_rates(&self, symbol: &str) -> Result<Vec<Mt5Rate>, Mt5HttpError> {
         let response = self.http_get_rates(symbol).await?;
-        parse_rates(&response).map_err(|e| HttpClientError::ParseError(e.to_string()))
+        parse_rates(&response).map_err(|e| Mt5HttpError::ParseError(e.to_string()))
     }
 
-    pub async fn get_positions(&self) -> Result<Vec<Mt5Position>, HttpClientError> {
+    pub async fn get_positions(&self) -> Result<Vec<Mt5Position>, Mt5HttpError> {
         let response = self.http_get_positions().await?;
         serde_json::from_str::<Vec<Mt5Position>>(&response)
-            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse positions: {}", e)))
+            .map_err(|e| Mt5HttpError::JsonDecodeError(format!("Failed to parse positions: {}", e)))
     }
 
-    pub async fn get_trades(&self) -> Result<Vec<Mt5Trade>, HttpClientError> {
+    pub async fn get_trades(&self) -> Result<Vec<Mt5Trade>, Mt5HttpError> {
         let response = self.http_get_trades().await?;
         serde_json::from_str::<Vec<Mt5Trade>>(&response)
-            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse trades: {}", e)))
+            .map_err(|e| Mt5HttpError::JsonDecodeError(format!("Failed to parse trades: {}", e)))
     }
 
-    pub async fn get_orders(&self) -> Result<Vec<Mt5OrderResponse>, HttpClientError> {
+    pub async fn get_orders(&self) -> Result<Vec<Mt5OrderResponse>, Mt5HttpError> {
         let response = self.http_get_orders().await?;
         serde_json::from_str::<Vec<Mt5OrderResponse>>(&response)
-            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse orders: {}", e)))
+            .map_err(|e| Mt5HttpError::JsonDecodeError(format!("Failed to parse orders: {}", e)))
     }
 
-    pub async fn submit_order(&self, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
+    pub async fn submit_order(&self, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, Mt5HttpError> {
         let response = self.http_submit_order(&order).await?;
         serde_json::from_str::<Mt5OrderResponse>(&response)
-            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse order response: {}", e)))
+            .map_err(|e| Mt5HttpError::JsonDecodeError(format!("Failed to parse order response: {}", e)))
     }
 
-    pub async fn cancel_order(&self, order_id: u64) -> Result<(), HttpClientError> {
+    pub async fn cancel_order(&self, order_id: u64) -> Result<(), Mt5HttpError> {
         let _response = self.http_cancel_order(order_id).await?;
         Ok(())
     }
 
-    pub async fn modify_order(&self, order_id: u64, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
+    pub async fn modify_order(&self, order_id: u64, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, Mt5HttpError> {
         let response = self.http_modify_order(order_id, &order).await?;
         serde_json::from_str::<Mt5OrderResponse>(&response)
-            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse modify order response: {}", e)))
+            .map_err(|e| Mt5HttpError::JsonDecodeError(format!("Failed to parse modify order response: {}", e)))
     }
 
-    pub async fn get_history(&self, symbol: Option<&str>, from: Option<u64>, to: Option<u64>) -> Result<Vec<Mt5Trade>, HttpClientError> {
+    pub async fn get_history(&self, symbol: Option<&str>, from: Option<u64>, to: Option<u64>) -> Result<Vec<Mt5Trade>, Mt5HttpError> {
         let response = self.http_get_history(symbol, from, to).await?;
         serde_json::from_str::<Vec<Mt5Trade>>(&response)
-            .map_err(|e| HttpClientError::JsonDecodeError(format!("Failed to parse history: {}", e)))
+            .map_err(|e| Mt5HttpError::JsonDecodeError(format!("Failed to parse history: {}", e)))
     }
 }
 
 impl Mt5HttpClient {
-    pub fn new(config: Mt5Config, credential: Mt5Credential, url: Mt5Url) -> Result<Self, HttpClientError> {
-        let inner = Mt5HttpInnerClient::new(config, credential, url)?;
+    pub fn new(config: Mt5Config, credential: Mt5Credential, url: Mt5Url) -> Result<Self, Mt5HttpError> {
+        let inner = Mt5RawHttpClient::new(config, credential, url)?;
         Ok(Self {
             inner: Arc::new(inner),
         })
     }
 
-    pub async fn login(&self) -> Result<(), HttpClientError> {
+    pub async fn login(&self) -> Result<(), Mt5HttpError> {
         self.inner.login().await
     }
 
     // Delegate all methods to the inner client
-    pub async fn get_account_info(&self) -> Result<Mt5AccountInfo, HttpClientError> {
+    pub async fn get_account_info(&self) -> Result<Mt5AccountInfo, Mt5HttpError> {
         self.inner.get_account_info().await
     }
 
-    pub async fn get_symbols(&self) -> Result<Vec<Mt5Symbol>, HttpClientError> {
+    pub async fn get_symbols(&self) -> Result<Vec<Mt5Symbol>, Mt5HttpError> {
         self.inner.get_symbols().await
     }
 
-    pub async fn get_symbol_info(&self, symbol: &str) -> Result<Mt5Symbol, HttpClientError> {
+    pub async fn get_symbol_info(&self, symbol: &str) -> Result<Mt5Symbol, Mt5HttpError> {
         self.inner.get_symbol_info(symbol).await
     }
 
-    pub async fn get_rates(&self, symbol: &str) -> Result<Vec<Mt5Rate>, HttpClientError> {
+    pub async fn get_rates(&self, symbol: &str) -> Result<Vec<Mt5Rate>, Mt5HttpError> {
         self.inner.get_rates(symbol).await
     }
 
-    pub async fn get_positions(&self) -> Result<Vec<Mt5Position>, HttpClientError> {
+    pub async fn get_positions(&self) -> Result<Vec<Mt5Position>, Mt5HttpError> {
         self.inner.get_positions().await
     }
 
-    pub async fn get_trades(&self) -> Result<Vec<Mt5Trade>, HttpClientError> {
+    pub async fn get_trades(&self) -> Result<Vec<Mt5Trade>, Mt5HttpError> {
         self.inner.get_trades().await
     }
 
-    pub async fn get_orders(&self) -> Result<Vec<Mt5OrderResponse>, HttpClientError> {
+    pub async fn get_orders(&self) -> Result<Vec<Mt5OrderResponse>, Mt5HttpError> {
         self.inner.get_orders().await
     }
 
-    pub async fn submit_order(&self, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
+    pub async fn submit_order(&self, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, Mt5HttpError> {
         self.inner.submit_order(order).await
     }
 
-    pub async fn cancel_order(&self, order_id: u64) -> Result<(), HttpClientError> {
+    pub async fn cancel_order(&self, order_id: u64) -> Result<(), Mt5HttpError> {
         self.inner.cancel_order(order_id).await
     }
 
-    pub async fn modify_order(&self, order_id: u64, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, HttpClientError> {
+    pub async fn modify_order(&self, order_id: u64, order: Mt5OrderRequest) -> Result<Mt5OrderResponse, Mt5HttpError> {
         self.inner.modify_order(order_id, order).await
     }
 
-    pub async fn get_history(&self, symbol: Option<&str>, from: Option<u64>, to: Option<u64>) -> Result<Vec<Mt5Trade>, HttpClientError> {
+    pub async fn get_history(&self, symbol: Option<&str>, from: Option<u64>, to: Option<u64>) -> Result<Vec<Mt5Trade>, Mt5HttpError> {
         self.inner.get_history(symbol, from, to).await
     }
 }
@@ -482,7 +523,7 @@ impl Mt5HttpClient {
 #[pymethods]
 impl Mt5HttpClient {
     #[new]
-    fn new_py(config: Mt5Config, credential: Mt5Credential, url: Mt5Url) -> Result<Self, HttpClientError> {
+    fn new_py(config: Mt5Config, credential: Mt5Credential, url: Mt5Url) -> Result<Self, Mt5HttpError> {
         Self::new(config, credential, url)
     }
     
@@ -575,7 +616,7 @@ impl Mt5HttpClient {
 mod tests {
     use super::*;
 
-    fn create_test_client() -> Result<Mt5HttpClient, HttpClientError> {
+    fn create_test_client() -> Result<Mt5HttpClient, Mt5HttpError> {
         let config = Mt5Config {
             base_url: "http://localhost:8080".to_string(),
             ws_url: "ws://localhost:8080".to_string(),
@@ -629,7 +670,7 @@ mod tests {
         let result = client.get_account_info().await;
         assert!(result.is_err());
         match result {
-            Err(HttpClientError::AuthenticationError(_)) => (),
+            Err(Mt5HttpError::AuthenticationError(_)) => (),
             _ => panic!("Expected AuthenticationError"),
         }
     }
@@ -703,7 +744,7 @@ mod tests {
             let result = client.login().await;
             assert!(result.is_err());
             match result {
-                Err(HttpClientError::AuthenticationError(_)) => (),
+                Err(Mt5HttpError::AuthenticationError(_)) => (),
                 _ => panic!("Expected AuthenticationError for status 401"),
             }
         }
@@ -829,7 +870,7 @@ mod tests {
             let result = client.get_account_info().await;
             assert!(result.is_err());
             match result {
-                Err(HttpClientError::AuthenticationError(_)) => (),
+                Err(Mt5HttpError::AuthenticationError(_)) => (),
                 _ => panic!("Expected AuthenticationError for status 401"),
             }
         }
@@ -1027,7 +1068,7 @@ mod tests {
 
             let client = Mt5HttpClient::new(config, cred, url).unwrap();
             let result = tokio::time::timeout(
-                Duration::from_secs(2),
+                std::time::Duration::from_secs(2),
                 client.get_account_info(),
             ).await;
 

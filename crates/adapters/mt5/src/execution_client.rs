@@ -19,7 +19,8 @@
 //! providing order management and execution functionality.
 
 use crate::config::{Mt5Config, Mt5ExecutionClientConfig};
-use crate::http::client::{Mt5HttpClient, HttpClientError};
+use crate::http::client::Mt5HttpClient;
+use crate::http::error::Mt5HttpError as HttpClientError;
 use crate::http::models::Mt5OrderRequest;
 use crate::common::credential::Mt5Credential;
 use crate::common::urls::Mt5Url;
@@ -87,7 +88,7 @@ impl Mt5ExecutionClient {
                 .build()
                 .map_err(|e| ExecutionClientError::ConnectionError(e.to_string()))?,
             url,
-        )?);
+        ).map_err(|e| ExecutionClientError::ConnectionError(e.to_string()))?);
 
         Ok(Self {
             config,
