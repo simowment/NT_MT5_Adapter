@@ -77,8 +77,11 @@ impl Mt5InstrumentProvider {
 
     pub async fn discover_instruments(&self) -> Result<Vec<Instrument>, InstrumentProviderError> {
         // Get all symbols from MT5
-        let symbols = self.http_client.get_symbols().await
+        let body = serde_json::json!({});
+        let response = self.http_client.symbols_get(&body).await
             .map_err(|e| InstrumentProviderError::ConnectionError(e.to_string()))?;
+        let symbols: Vec<crate::http::models::Mt5Symbol> = serde_json::from_value(response)
+            .map_err(|e| InstrumentProviderError::ParseError(e.to_string()))?;
 
         let mut instruments = Vec::new();
 
@@ -128,17 +131,20 @@ impl Mt5InstrumentProvider {
         }
 
         // If not in cache, get from MT5
-        if let Ok(symbol) = self.http_client.get_symbol_info(&instrument_id.to_string()).await {
-            if let Ok(metadata) = self.parse_symbol_metadata(&symbol) {
-                if let Ok(instrument) = self.create_instrument(&metadata) {
-                    // Add to cache
-                    {
-                        let mut cache = self.cache.write().await;
-                        // Since cache is Vec<InstrumentMetadata>, we need to push the metadata instead of the instrument
-                        cache.push(metadata.clone());
+        let body = serde_json::json!({ "symbol": instrument_id.symbol });
+        if let Ok(response) = self.http_client.symbol_info(&body).await {
+            if let Ok(symbol) = serde_json::from_value::<crate::http::models::Mt5Symbol>(response) {
+                if let Ok(metadata) = self.parse_symbol_metadata(&symbol) {
+                    if let Ok(instrument) = self.create_instrument(&metadata) {
+                        // Add to cache
+                        {
+                            let mut cache = self.cache.write().await;
+                            // Since cache is Vec<InstrumentMetadata>, we need to push the metadata instead of the instrument
+                            cache.push(metadata.clone());
+                        }
+                        
+                        return Some(instrument);
                     }
-                    
-                    return Some(instrument);
                 }
             }
         }

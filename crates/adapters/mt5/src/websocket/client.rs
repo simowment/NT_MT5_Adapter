@@ -23,7 +23,7 @@ use tokio::sync::Mutex;
 use tracing::{error};
 
 use crate::common::credential::Mt5Credential;
-use crate::websocket::messages::{WsPing, WsPong};
+use crate::websocket::messages::{WsPong};
 use crate::websocket::parse::WsMessage;
 use thiserror::Error;
 
@@ -60,12 +60,6 @@ impl WebSocketError {
             WebSocketError::ConnectionFailed(_) | WebSocketError::ReceiveError(_)
         )
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum SubscriptionState {
-    Pending,
-    Confirmed,
 }
 
 // Client WebSocket pour MT5.

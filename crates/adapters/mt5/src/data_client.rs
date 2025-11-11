@@ -6,13 +6,13 @@
 //  You may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 //
-//  Unless required by applicable law or agreed to in writing, software
+// Unless required by applicable law or agreed to in writing, software
 //  distributed under the License is distributed on an "AS IS" BASIS,
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
-
+//
 //! MT5 Data Client implementation.
 //!
 //! This module implements the data client for the MetaTrader 5 adapter,
@@ -74,12 +74,21 @@ impl Mt5DataClient {
 
     /// Performs a login to validate connectivity with the MT5 bridge.
     pub async fn connect(&self) -> Result<(), DataClientError> {
-        self.http_client.login().await.map_err(|e| DataClientError::ConnectionError(e.to_string()))
+        let login_body = serde_json::json!({
+            "login": self.config.credential.login,
+            "password": self.config.credential.password,
+            "server": self.config.credential.server,
+        });
+        let _response = self.http_client.login().await.map_err(|e| DataClientError::ConnectionError(e.to_string()))?;
+        Ok(())
     }
 
     /// Fetches all symbols from the MT5 bridge.
     pub async fn get_symbols(&self) -> Result<Vec<crate::http::models::Mt5Symbol>, DataClientError> {
-        let symbols = self.http_client.get_symbols().await.map_err(|e| DataClientError::ConnectionError(e.to_string()))?;
+        let body = serde_json::json!({});
+        let response = self.http_client.symbols_get(&body).await.map_err(|e| DataClientError::ConnectionError(e.to_string()))?;
+        let symbols: Vec<crate::http::models::Mt5Symbol> = serde_json::from_value(response)
+            .map_err(|e| DataClientError::ParseError(e.to_string()))?;
         Ok(symbols)
     }
 }

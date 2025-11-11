@@ -17,7 +17,7 @@
 
 use std::net::SocketAddr;
 
-use axum::{response::Json, routing::get, Router, serve};
+use axum::{response::Json, routing::get, Router};
 use serde_json::json;
 use tracing::info;
 

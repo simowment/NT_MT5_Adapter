@@ -6,13 +6,13 @@
 //  You may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 //
-//  Unless required by applicable law or agreed to in writing, software
+// Unless required by applicable law or agreed to in writing, software
 //  distributed under the License is distributed on an "AS IS" BASIS,
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
-
+//
 //! MT5 Execution Client implementation.
 //!
 //! This module implements the execution client for the MetaTrader 5 adapter,
@@ -103,7 +103,7 @@ impl Mt5ExecutionClient {
     /// A result indicating success or failure.
     pub async fn connect(&self) -> Result<(), ExecutionClientError> {
         // Connect HTTP
-        self.http_client.login().await
+        let _response = self.http_client.login().await
             .map_err(|e| ExecutionClientError::ConnectionError(e.to_string()))?;
 
         tracing::info!("MT5 execution client connected");
@@ -148,7 +148,8 @@ impl Mt5ExecutionClient {
             self.simulate_order_execution(order).await?;
         } else {
             // Submit real order via HTTP
-            let response = self.http_client.submit_order(mt5_order).await
+            let body = serde_json::json!(&mt5_order);
+            let _response = self.http_client.order_send(&body).await
                 .map_err(|e| ExecutionClientError::ParseError(e.to_string()))?;
         }
 
@@ -168,7 +169,7 @@ impl Mt5ExecutionClient {
     ///
     /// A result indicating success or failure.
     pub async fn modify_order(&self, client_order_id: &ClientOrderId, modifications: &OrderModifications) -> Result<(), ExecutionClientError> {
-        let order_id = client_order_id.to_string();
+        let _order_id = client_order_id.to_string();
         
         if self.config.simulate_orders {
             // Simulate order modification
@@ -182,7 +183,8 @@ impl Mt5ExecutionClient {
                 order_type: "MODIFY".to_string(),
                 comment: None,
             };
-            self.http_client.modify_order(order_id.parse().unwrap_or(0), mt5_order).await
+            let body = serde_json::json!(&mt5_order);
+            let _response = self.http_client.order_send(&body).await
                 .map_err(|e| ExecutionClientError::ParseError(e.to_string()))?;
         }
 
@@ -201,14 +203,15 @@ impl Mt5ExecutionClient {
     ///
     /// A result indicating success or failure.
     pub async fn cancel_order(&self, client_order_id: &ClientOrderId) -> Result<(), ExecutionClientError> {
-        let order_id = client_order_id.to_string();
+        let _order_id = client_order_id.to_string();
         
         if self.config.simulate_orders {
             // Simulate order cancellation
             self.simulate_order_cancellation(client_order_id).await?;
         } else {
             // Submit real order cancellation
-            self.http_client.cancel_order(order_id.parse().unwrap_or(0)).await
+            let body = serde_json::json!({ "order_id": _order_id });
+            let _response = self.http_client.order_send(&body).await
                 .map_err(|e| ExecutionClientError::ParseError(e.to_string()))?;
         }
 
@@ -262,8 +265,14 @@ impl Mt5ExecutionClient {
     /// A position status report.
     pub async fn generate_position_status_report(&self) -> Result<PositionStatusReport, ExecutionClientError> {
         // Get positions from MT5
-        let positions = self.http_client.get_positions().await
+        let body = serde_json::json!({});
+        let response = self.http_client.positions_get(&body).await
             .map_err(|e| ExecutionClientError::ConnectionError(e.to_string()))?;
+
+        // Parse positions from response (mock implementation)
+        // In real implementation, this would parse the response into position data
+        let positions: Vec<Mt5Position> = serde_json::from_value(response)
+            .unwrap_or_else(|_| vec![]);
 
         if let Some(position) = positions.first() {
             Ok(PositionStatusReport {
@@ -526,4 +535,14 @@ impl std::fmt::Display for InstrumentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}", self.symbol, self.venue)
     }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Mt5Position {
+    pub ticket: u64,
+    pub symbol: String,
+    pub volume: f64,
+    pub open_price: f64,
+    pub current_price: f64,
+    pub profit: f64,
 }
