@@ -1,3 +1,8 @@
+//! HTTP client implementation for MetaTrader 5 adapter.
+//!
+//! This module provides a complete HTTP client for interacting with the MT5 proxy,
+//! including authentication, error handling, and all supported API endpoints.
+
 pub mod client;
 pub mod error;
 pub mod models;

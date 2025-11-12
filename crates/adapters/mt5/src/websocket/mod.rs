@@ -1,3 +1,8 @@
+//! WebSocket client implementation for MetaTrader 5 adapter.
+//!
+//! This module provides a complete WebSocket client for real-time communication
+//! with the MT5 proxy, including message handling, parsing, and error management.
+
 pub mod client;
 pub mod enums;
 pub mod error;
