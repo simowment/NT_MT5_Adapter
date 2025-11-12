@@ -16,8 +16,8 @@
  //! Configuration structures for the MetaTrader 5 adapter.
  //!
  //! This module defines the configuration structures for the MT5 adapter.
- //! Mt5Config décrit les endpoints et timeouts HTTP/WS du bridge MT5.
- //! Les identifiants (login/password/server) sont portés par `Mt5Credential` (common/credential.rs).
+ //! Mt5Config describes the HTTP/WS endpoints and timeouts of the MT5 bridge.
+ //! The credentials (login/password/server) are carried by `Mt5Credential` (common/credential.rs).
 
 use serde::{Deserialize, Serialize};
 

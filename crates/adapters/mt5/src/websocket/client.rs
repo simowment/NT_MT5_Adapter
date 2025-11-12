@@ -62,15 +62,15 @@ impl WebSocketError {
     }
 }
 
-// Client WebSocket pour MT5.
-// Gère:
-// - Connexion/authentification
-// - Lifecycle des subscriptions (pending/confirmed)
-// - Reconnexion
+// WebSocket client for MT5.
+// Handles:
+// - Connection/authentication
+// - Subscription lifecycle (pending/confirmed)
+// - Reconnection
 // - Ping/Pong
-// - Routing des messages
+// - Message routing
 //
-// Conçu pour être cloné et partagé entre tâches (Arc<Mutex<>>).
+// Designed to be cloned and shared between tasks (Arc<Mutex<>>).
 #[cfg_attr(feature = "python-bindings", pyclass)]
 pub struct Mt5WebSocketClient {
     credential: Mt5Credential,
@@ -339,7 +339,7 @@ mod tests {
         let client = Mt5WebSocketClient::new(cred, "ws://localhost");
 
         assert_eq!(client.url, "ws://localhost");
-        // CORRECTION: is_authenticated() est async, nécessite await
+        // CORRECTION: is_authenticated() is async, requires await
         assert!(!client.is_authenticated().await);
     }
 

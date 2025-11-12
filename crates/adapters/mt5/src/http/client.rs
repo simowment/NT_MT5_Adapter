@@ -13,16 +13,16 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 //
-//! HTTP client générique pour le proxy HTTP MetaTrader 5.
+//! Generic HTTP client for the MetaTrader 5 HTTP proxy.
 //!
-//! Objectif (confirmé) :
-//! - Consommer UNIQUEMENT les routes POST JSON exposées par le proxy MT5 (ex: /api/login, /api/account_info, /api/order_send, etc.).
-//! - Transmettre `json_body` tel quel (serde_json::Value) sans logique métier Nautilus.
-//! - Laisser une couche supérieure adapter les réponses vers les types Nautilus / backtest.
+//! Purpose (confirmed):
+//! - Consume ONLY the POST JSON routes exposed by the MT5 proxy (ex: /api/login, /api/account_info, /api/order_send, etc.).
+//! - Transmit `json_body` as-is (serde_json::Value) without Nautilus business logic.
+//! - Let a higher layer adapt responses to Nautilus / backtest types.
 //!
-//! Ce module fournit donc :
-//! - Mt5RawHttpClient : client bas-niveau, finement configurable, qui parle en JSON brut.
-//! - Mt5HttpClient : wrapper clonable, exposant une API ergonomique pour chaque endpoint du proxy.
+//! This module therefore provides:
+//! - Mt5HttpInnerClient: low-level client, finely configurable, that speaks in raw JSON.
+//! - Mt5HttpClient: clonable wrapper, exposing an ergonomic API for each proxy endpoint.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -40,7 +40,7 @@ use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
 
 // Low-level MT5 HTTP client (inner)
-pub struct Mt5RawHttpClient {
+pub struct Mt5HttpInnerClient {
     base_url: String,
     client: HttpClient,
     credential: Arc<Mutex<Mt5Credential>>,
@@ -48,10 +48,10 @@ pub struct Mt5RawHttpClient {
 
 #[cfg_attr(feature = "python-bindings", pyclass)]
 pub struct Mt5HttpClient {
-    inner: Arc<Mt5RawHttpClient>,
+    inner: Arc<Mt5HttpInnerClient>,
 }
 
-impl Mt5RawHttpClient {
+impl Mt5HttpInnerClient {
     pub fn new(config: Mt5Config, credential: Mt5Credential, url: Mt5Url) -> Result<Self, Mt5HttpError> {
         let mut headers = HashMap::new();
         headers.insert("User-Agent".to_string(), "nautilus-mt5-adapter".to_string());
@@ -123,7 +123,7 @@ impl Mt5RawHttpClient {
             .map_err(|e| Mt5HttpError::JsonDecodeError(format!("Invalid JSON response: {}", e)))
     }
 
-    // Login via /api/login (sans token préalable)
+    // Login via /api/login (without prior token)
     pub async fn http_login(
         &self,
         login: &str,
@@ -138,7 +138,7 @@ impl Mt5RawHttpClient {
 
         let resp = self.post_json("/api/login", &body).await?;
 
-        // Si le proxy renvoie un token, on le stocke dans les credentials
+        // If the proxy returns a token, store it in the credentials
         if let Some(token) = resp
             .get("token")
             .and_then(|v| v.as_str())
@@ -151,220 +151,220 @@ impl Mt5RawHttpClient {
         Ok(resp)
     }
 
-    // Endpoints génériques : chaque méthode prend un `serde_json::Value` (json_body)
-    // et renvoie `serde_json::Value` brut tel que renvoyé par le proxy MT5.
+    // Generic endpoints: each method takes a `serde_json::Value` (json_body)
+    // and returns raw `serde_json::Value` as returned by the MT5 proxy.
 
-    pub async fn account_info(
+    pub async fn http_account_info(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/account_info", body).await
     }
 
-    pub async fn copy_rates_from(
+    pub async fn http_copy_rates_from(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/copy_rates_from", body).await
     }
 
-    pub async fn copy_rates_from_pos(
+    pub async fn http_copy_rates_from_pos(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/copy_rates_from_pos", body).await
     }
 
-    pub async fn copy_rates_range(
+    pub async fn http_copy_rates_range(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/copy_rates_range", body).await
     }
 
-    pub async fn copy_ticks_from(
+    pub async fn http_copy_ticks_from(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/copy_ticks_from", body).await
     }
 
-    pub async fn copy_ticks_range(
+    pub async fn http_copy_ticks_range(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/copy_ticks_range", body).await
     }
 
-    pub async fn history_deals_get(
+    pub async fn http_history_deals_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/history_deals_get", body).await
     }
 
-    pub async fn history_deals_total(
+    pub async fn http_history_deals_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/history_deals_total", body).await
     }
 
-    pub async fn history_orders_get(
+    pub async fn http_history_orders_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/history_orders_get", body).await
     }
 
-    pub async fn history_orders_total(
+    pub async fn http_history_orders_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/history_orders_total", body).await
     }
 
-    pub async fn initialize(
+    pub async fn http_initialize(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/initialize", body).await
     }
 
-    pub async fn last_error(
+    pub async fn http_last_error(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/last_error", body).await
     }
 
-    pub async fn market_book_add(
+    pub async fn http_market_book_add(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/market_book_add", body).await
     }
 
-    pub async fn market_book_get(
+    pub async fn http_market_book_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/market_book_get", body).await
     }
 
-    pub async fn market_book_release(
+    pub async fn http_market_book_release(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/market_book_release", body).await
     }
 
-    pub async fn order_calc_margin(
+    pub async fn http_order_calc_margin(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/order_calc_margin", body).await
     }
 
-    pub async fn order_calc_profit(
+    pub async fn http_order_calc_profit(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/order_calc_profit", body).await
     }
 
-    pub async fn order_check(
+    pub async fn http_order_check(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/order_check", body).await
     }
 
-    pub async fn order_send(
+    pub async fn http_order_send(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/order_send", body).await
     }
 
-    pub async fn orders_get(
+    pub async fn http_orders_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/orders_get", body).await
     }
 
-    pub async fn orders_total(
+    pub async fn http_orders_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/orders_total", body).await
     }
 
-    pub async fn positions_get(
+    pub async fn http_positions_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/positions_get", body).await
     }
 
-    pub async fn positions_total(
+    pub async fn http_positions_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/positions_total", body).await
     }
 
-    pub async fn shutdown(
+    pub async fn http_shutdown(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/shutdown", body).await
     }
 
-    pub async fn symbol_info(
+    pub async fn http_symbol_info(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/symbol_info", body).await
     }
 
-    pub async fn symbol_info_tick(
+    pub async fn http_symbol_info_tick(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/symbol_info_tick", body).await
     }
 
-    pub async fn symbol_select(
+    pub async fn http_symbol_select(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/symbol_select", body).await
     }
 
-    pub async fn symbols_get(
+    pub async fn http_symbols_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/symbols_get", body).await
     }
 
-    pub async fn symbols_total(
+    pub async fn http_symbols_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/symbols_total", body).await
     }
 
-    pub async fn terminal_info(
+    pub async fn http_terminal_info(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.post_json("/api/terminal_info", body).await
     }
 
-    pub async fn version(
+    pub async fn http_version(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
@@ -378,13 +378,13 @@ impl Mt5HttpClient {
         credential: Mt5Credential,
         url: Mt5Url,
     ) -> Result<Self, Mt5HttpError> {
-        let inner = Mt5RawHttpClient::new(config, credential, url)?;
+        let inner = Mt5HttpInnerClient::new(config, credential, url)?;
         Ok(Self {
             inner: Arc::new(inner),
         })
     }
 
-    // login via proxy
+    // Login via proxy
     pub async fn login(&self) -> Result<serde_json::Value, Mt5HttpError> {
         let cred = { self.inner.credential.lock().await.clone() };
         self.inner
@@ -392,222 +392,222 @@ impl Mt5HttpClient {
             .await
     }
 
-    // Expose all proxy methods en déléguant à Mt5RawHttpClient.
+    // Expose all proxy methods delegating to Mt5HttpInnerClient.
     pub async fn account_info(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.account_info(body).await
+        self.inner.http_account_info(body).await
     }
 
     pub async fn copy_rates_from(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.copy_rates_from(body).await
+        self.inner.http_copy_rates_from(body).await
     }
 
     pub async fn copy_rates_from_pos(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.copy_rates_from_pos(body).await
+        self.inner.http_copy_rates_from_pos(body).await
     }
 
     pub async fn copy_rates_range(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.copy_rates_range(body).await
+        self.inner.http_copy_rates_range(body).await
     }
 
     pub async fn copy_ticks_from(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.copy_ticks_from(body).await
+        self.inner.http_copy_ticks_from(body).await
     }
 
     pub async fn copy_ticks_range(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.copy_ticks_range(body).await
+        self.inner.http_copy_ticks_range(body).await
     }
 
     pub async fn history_deals_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.history_deals_get(body).await
+        self.inner.http_history_deals_get(body).await
     }
 
     pub async fn history_deals_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.history_deals_total(body).await
+        self.inner.http_history_deals_total(body).await
     }
 
     pub async fn history_orders_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.history_orders_get(body).await
+        self.inner.http_history_orders_get(body).await
     }
 
     pub async fn history_orders_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.history_orders_total(body).await
+        self.inner.http_history_orders_total(body).await
     }
 
     pub async fn initialize(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.initialize(body).await
+        self.inner.http_initialize(body).await
     }
 
     pub async fn last_error(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.last_error(body).await
+        self.inner.http_last_error(body).await
     }
 
     pub async fn market_book_add(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.market_book_add(body).await
+        self.inner.http_market_book_add(body).await
     }
 
     pub async fn market_book_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.market_book_get(body).await
+        self.inner.http_market_book_get(body).await
     }
 
     pub async fn market_book_release(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.market_book_release(body).await
+        self.inner.http_market_book_release(body).await
     }
 
     pub async fn order_calc_margin(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.order_calc_margin(body).await
+        self.inner.http_order_calc_margin(body).await
     }
 
     pub async fn order_calc_profit(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.order_calc_profit(body).await
+        self.inner.http_order_calc_profit(body).await
     }
 
     pub async fn order_check(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.order_check(body).await
+        self.inner.http_order_check(body).await
     }
 
     pub async fn order_send(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.order_send(body).await
+        self.inner.http_order_send(body).await
     }
 
     pub async fn orders_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.orders_get(body).await
+        self.inner.http_orders_get(body).await
     }
 
     pub async fn orders_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.orders_total(body).await
+        self.inner.http_orders_total(body).await
     }
 
     pub async fn positions_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.positions_get(body).await
+        self.inner.http_positions_get(body).await
     }
 
     pub async fn positions_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.positions_total(body).await
+        self.inner.http_positions_total(body).await
     }
 
     pub async fn shutdown(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.shutdown(body).await
+        self.inner.http_shutdown(body).await
     }
 
     pub async fn symbol_info(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.symbol_info(body).await
+        self.inner.http_symbol_info(body).await
     }
 
     pub async fn symbol_info_tick(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.symbol_info_tick(body).await
+        self.inner.http_symbol_info_tick(body).await
     }
 
     pub async fn symbol_select(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.symbol_select(body).await
+        self.inner.http_symbol_select(body).await
     }
 
     pub async fn symbols_get(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.symbols_get(body).await
+        self.inner.http_symbols_get(body).await
     }
 
     pub async fn symbols_total(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.symbols_total(body).await
+        self.inner.http_symbols_total(body).await
     }
 
     pub async fn terminal_info(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.terminal_info(body).await
+        self.inner.http_terminal_info(body).await
     }
 
     pub async fn version(
         &self,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
-        self.inner.version(body).await
+        self.inner.http_version(body).await
     }
 }
 

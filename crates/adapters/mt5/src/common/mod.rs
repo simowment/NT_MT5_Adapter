@@ -1,3 +1,13 @@
+//! Common types and utilities for the MetaTrader 5 adapter.
+//!
+//! This module contains shared functionality including:
+//! - Constants and configuration values
+//! - Authentication credentials
+//! - Common enums and data structures
+//! - Parsing utilities
+//! - URL management
+//! - Testing utilities
+
 pub mod consts;
 pub mod credential;
 pub mod enums;

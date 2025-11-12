@@ -86,8 +86,8 @@ impl Mt5InstrumentProvider {
         let mut instruments = Vec::new();
 
         for symbol in symbols {
-            // Ici on mappe simplement Mt5Symbol -> InstrumentMetadata (MVP).
-            // À affiner selon le schéma réel du bridge.
+            // Here we simply map Mt5Symbol -> InstrumentMetadata (MVP).
+            // To be refined according to the actual bridge schema.
             let metadata = InstrumentMetadata {
                 symbol: symbol.symbol.clone(),
                 digits: symbol.digits as u8,
