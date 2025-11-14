@@ -7,8 +7,8 @@
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 //
 // Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
@@ -54,6 +54,11 @@ pub fn nautilus_adapters_mt5(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<crate::http::query::AccountInfoParams>()?;
     m.add_class::<crate::http::query::SymbolsInfoParams>()?;
     m.add_class::<crate::http::query::RatesInfoParams>()?;
+
+    // Add the main client classes
+    m.add_class::<crate::data_client::Mt5DataClient>()?;
+    m.add_class::<crate::execution_client::Mt5ExecutionClient>()?;
+    m.add_class::<crate::instrument_provider::Mt5InstrumentProvider>()?;
 
     Ok(())
 }

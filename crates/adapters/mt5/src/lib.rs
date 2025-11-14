@@ -35,7 +35,7 @@ pub mod data_client;
 pub mod execution_client;
 pub mod instrument_provider;
 
-#[cfg(feature = "python")]
+#[cfg(feature = "python-bindings")]
 pub mod python;
 
 pub use common::*;

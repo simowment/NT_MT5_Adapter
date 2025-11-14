@@ -35,6 +35,19 @@ impl From<String> for InstrumentProviderError {
 // Remove the problematic conversion implementation
 // We'll handle the error conversion differently
 
+#[cfg(feature = "python-bindings")]
+use pyo3::prelude::*;
+
+#[cfg(feature = "python-bindings")]
+#[derive(Clone, Debug)]
+#[pyclass]
+pub struct Mt5InstrumentProvider {
+    config: Mt5InstrumentProviderConfig,
+    http_client: Arc<Mt5HttpClient>,
+    cache: Arc<RwLock<Vec<InstrumentMetadata>>>,
+}
+
+#[cfg(not(feature = "python-bindings"))]
 pub struct Mt5InstrumentProvider {
     config: Mt5InstrumentProviderConfig,
     http_client: Arc<Mt5HttpClient>,
@@ -118,39 +131,6 @@ impl Mt5InstrumentProvider {
         Ok(instruments_converted)
     }
 
-    pub async fn get_instrument(&self, instrument_id: &InstrumentId) -> Option<Instrument> {
-        // Check cache first
-        {
-            let cache = self.cache.read().await;
-            // Since we're dealing with Vec<InstrumentMetadata>, we need to search by symbol
-            for instrument in cache.iter() {
-                if instrument.symbol == instrument_id.symbol {
-                    return Some(self.create_instrument(instrument).unwrap());
-                }
-            }
-        }
-
-        // If not in cache, get from MT5
-        let body = serde_json::json!({ "symbol": instrument_id.symbol });
-        if let Ok(response) = self.http_client.symbol_info(&body).await {
-            if let Ok(symbol) = serde_json::from_value::<crate::http::models::Mt5Symbol>(response) {
-                if let Ok(metadata) = self.parse_symbol_metadata(&symbol) {
-                    if let Ok(instrument) = self.create_instrument(&metadata) {
-                        // Add to cache
-                        {
-                            let mut cache = self.cache.write().await;
-                            // Since cache is Vec<InstrumentMetadata>, we need to push the metadata instead of the instrument
-                            cache.push(metadata.clone());
-                        }
-                        
-                        return Some(instrument);
-                    }
-                }
-            }
-        }
-        None
-    }
-
     pub async fn load_instruments(&self) -> Result<(), InstrumentProviderError> {
         let instruments = self.discover_instruments().await?;
         
@@ -160,97 +140,22 @@ impl Mt5InstrumentProvider {
         
         Ok(())
     }
+}
 
-    pub fn should_include_instrument(&self, symbol: &str) -> bool {
-        // Check currency filters
-        if symbol.len() == 6 {
-            let base = &symbol[..3];
-            let quote = &symbol[3..];
-            
-            if self.config.filter_currencies.contains(&base.to_string()) || 
-               self.config.filter_currencies.contains(&quote.to_string()) {
-                return true;
-            }
-        }
-        
-        // Check index filters
-        if self.config.filter_indices.contains(&symbol.to_string()) {
-            return true;
-        }
-        
-        // Check CFDs
-        if self.config.filter_cfds && symbol.chars().all(|c| c.is_alphanumeric()) {
-            return true;
-        }
-        
-        // Check futures
-        if self.config.filter_futures && symbol.len() >= 5 {
-            let letters_part: String = symbol.chars().take(symbol.len() - 4).collect();
-            let numbers_part: String = symbol.chars().skip(symbol.len() - 4).collect();
-            
-            if letters_part.chars().all(|c| c.is_alphabetic()) && 
-               numbers_part.chars().all(|c| c.is_numeric()) {
-                return true;
-            }
-        }
-        
-        false
+#[cfg(feature = "python-bindings")]
+#[pymethods]
+impl Mt5InstrumentProvider {
+    #[new]
+    pub fn new_py(config: Mt5InstrumentProviderConfig) -> Result<Self, PyErr> {
+        Self::new(config).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
-    fn parse_symbol_metadata(&self, symbol: &crate::http::models::Mt5Symbol) -> Result<InstrumentMetadata, InstrumentProviderError> {
-        // Use the parsing logic from common/parse.rs
-        let instrument_type = crate::common::parse::parse_instrument_symbol(&symbol.symbol)
-            .map_err(|e| InstrumentProviderError::ParseError(e.to_string()))?;
-
-        Ok(InstrumentMetadata {
-            symbol: symbol.symbol.clone(),
-            digits: symbol.digits as u8,
-            point_size: symbol.point_size,
-            volume_min: symbol.volume_min,
-            volume_max: symbol.volume_max,
-            volume_step: symbol.volume_step,
-            contract_size: symbol.contract_size,
-            instrument_type,
-        })
+    pub async fn discover_instruments(&self) -> Result<Vec<Instrument>, PyErr> {
+        self.discover_instruments().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
-    fn create_instrument(&self, metadata: &InstrumentMetadata) -> Result<Instrument, InstrumentProviderError> {
-        // Create the appropriate Nautilus instrument based on type
-        match &metadata.instrument_type {
-            crate::common::parse::InstrumentType::CurrencyPair { base_currency: _, quote_currency: _ } => {
-                // Create FX currency pair
-                let instrument_id = InstrumentId::from_str(&metadata.symbol).map_err(|e| {
-                    InstrumentProviderError::ParseError(format!("Invalid instrument ID: {}", e))
-                })?;
-
-                // For now, use generic instrument - this would need to use actual Nautilus FX types
-                let instrument = Instrument::new(
-                    instrument_id,
-                    Price::new(metadata.point_size, metadata.digits as u8),
-                    metadata.volume_min,
-                    metadata.volume_max,
-                    metadata.volume_step,
-                );
-
-                Ok(instrument)
-            }
-            _ => {
-                // Create generic instrument for CFDs, Futures, etc.
-                let instrument_id = InstrumentId::from_str(&metadata.symbol).map_err(|e| {
-                    InstrumentProviderError::ParseError(format!("Invalid instrument ID: {}", e))
-                })?;
-
-                let instrument = Instrument::new(
-                    instrument_id,
-                    Price::new(metadata.point_size, metadata.digits as u8),
-                    metadata.volume_min,
-                    metadata.volume_max,
-                    metadata.volume_step,
-                );
-
-                Ok(instrument)
-            }
-        }
+    pub async fn load_instruments(&self) -> Result<(), PyErr> {
+        self.load_instruments().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 }
 

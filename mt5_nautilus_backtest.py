@@ -21,7 +21,6 @@ from nautilus_trader.model.objects import Price, Quantity
 from nautilus_trader.model.identifiers import InstrumentId, StrategyId
 from nautilus_trader.trading.strategy import Strategy
 
-
 BASE_URL = "http://localhost:5000"
 
 

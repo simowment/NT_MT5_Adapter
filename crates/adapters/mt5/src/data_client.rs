@@ -6,7 +6,7 @@
 //  You may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 //
-// Unless required by applicable law or agreed to in writing, software
+//  Unless required by applicable law or agreed to in writing, software
 //  distributed under the License is distributed on an "AS IS" BASIS,
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
@@ -42,6 +42,18 @@ impl From<String> for DataClientError {
     }
 }
 
+#[cfg(feature = "python-bindings")]
+use pyo3::prelude::*;
+
+#[cfg(feature = "python-bindings")]
+#[derive(Clone, Debug)]
+#[pyclass]
+pub struct Mt5DataClient {
+    config: Mt5DataClientConfig,
+    http_client: Arc<Mt5HttpClient>,
+}
+
+#[cfg(not(feature = "python-bindings"))]
 pub struct Mt5DataClient {
     config: Mt5DataClientConfig,
     http_client: Arc<Mt5HttpClient>,
@@ -90,5 +102,22 @@ impl Mt5DataClient {
         let symbols: Vec<crate::http::models::Mt5Symbol> = serde_json::from_value(response)
             .map_err(|e| DataClientError::ParseError(e.to_string()))?;
         Ok(symbols)
+    }
+}
+
+#[cfg(feature = "python-bindings")]
+#[pymethods]
+impl Mt5DataClient {
+    #[new]
+    pub fn new_py(config: Mt5DataClientConfig) -> Result<Self, PyErr> {
+        Self::new(config).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    pub async fn connect(&self) -> Result<(), PyErr> {
+        self.connect().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    pub async fn get_symbols(&self) -> Result<Vec<crate::http::models::Mt5Symbol>, PyErr> {
+        self.get_symbols().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 }
