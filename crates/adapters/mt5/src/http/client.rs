@@ -24,7 +24,7 @@
 //! - Mt5HttpInnerClient: low-level client, finely configurable, that speaks in raw JSON.
 //! - Mt5HttpClient: clonable wrapper, exposing an ergonomic API for each proxy endpoint.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, sync::atomic::{AtomicBool, Ordering}};
 
 use nautilus_network::http::HttpClient;
 use tokio::sync::Mutex;
@@ -44,6 +44,7 @@ pub struct Mt5HttpInnerClient {
     base_url: String,
     client: HttpClient,
     credential: Arc<Mutex<Mt5Credential>>,
+    is_connected: Arc<AtomicBool>,
 }
 
 #[cfg_attr(feature = "python-bindings", pyclass)]
@@ -70,7 +71,16 @@ impl Mt5HttpInnerClient {
             base_url: url.base_url().to_string(),
             client,
             credential: Arc::new(Mutex::new(credential)),
+            is_connected: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.is_connected.load(Ordering::SeqCst)
+    }
+
+    fn set_connected(&self, connected: bool) {
+        self.is_connected.store(connected, Ordering::SeqCst);
     }
 
     async fn get_auth_header(&self) -> Result<String, Mt5HttpError> {
@@ -138,7 +148,7 @@ impl Mt5HttpInnerClient {
 
         let resp = self.post_json("/api/login", &body).await?;
 
-        // If the proxy returns a token, store it in the credentials
+        // If the proxy returns a token, store it in the credentials and mark as connected
         if let Some(token) = resp
             .get("token")
             .and_then(|v| v.as_str())
@@ -146,6 +156,8 @@ impl Mt5HttpInnerClient {
         {
             let mut cred = self.credential.lock().await;
             cred.token = Some(token);
+            drop(cred);
+            self.set_connected(true);
         }
 
         Ok(resp)
@@ -608,6 +620,10 @@ impl Mt5HttpClient {
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, Mt5HttpError> {
         self.inner.http_version(body).await
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.inner.is_connected()
     }
 }
 

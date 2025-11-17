@@ -38,6 +38,8 @@ async-trait = { workspace = true }
 dashmap = { workspace = true }
 futures = { workspace = true }
 axum = { workspace = true }
+sha2 = "0.10"
+hmac = "0.12"
 
 [dev-dependencies]
 nautilus-testkit = { workspace = true }
