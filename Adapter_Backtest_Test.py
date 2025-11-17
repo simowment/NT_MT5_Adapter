@@ -51,6 +51,7 @@ try:
     from nautilus_trader.adapters.metatrader5 import Mt5InstrumentProvider
     from nautilus_trader.adapters.metatrader5.config import Mt5DataClientConfig
     from nautilus_trader.adapters.metatrader5.config import Mt5ExecClientConfig
+    from nautilus_trader.adapters.metatrader5.factories import Mt5Factories
 
     print("Successfully imported MT5 adapter components")
     
@@ -67,13 +68,13 @@ async def test_mt5_adapter():
     print("Testing MT5 adapter...")
     
     # Configuration for MT5
-    mt5_config = Mt5DataClientConfig(
-        username="your_username",
-        password="your_password", 
-        server="your_server",
-        base_url="http://localhost:8000",
-        ws_url="ws://localhost:8000"
-    )
+    # mt5_config = Mt5DataClientConfig(
+    #     username="your_username",
+    #     password="your_password",
+    #     server="your_server",
+    #     base_url="http://localhost:8000",
+    #     ws_url="ws://localhost:8000"
+    # )
     
     # Create backtest engine
     config = BacktestEngineConfig(
@@ -121,18 +122,31 @@ def test_rust_bindings():
     """
     print("Testing Rust bindings...")
     
+    # Import the bindings module first to ensure the PyO3 module is loaded
+    from nautilus_trader.adapters.metatrader5 import bindings
+    
+    # Now try to import the Rust extension
     try:
-        # Try to import the Rust extension
         import nautilus_adapters_mt5
         
-        print(f"Successfully imported Rust extension: {nautilus_adapters_mt5.__version__}")
+        # Check if the module has version info before accessing it
+        version = getattr(nautilus_adapters_mt5, '__version__', 'Unknown version')
+        print(f"Successfully imported Rust extension: {version}")
         
         # List available classes in the Rust extension
         available_classes = [attr for attr in dir(nautilus_adapters_mt5) if not attr.startswith('_')]
         print(f"Available classes in Rust extension: {available_classes}")
         
+        # Verify that the expected classes exist in the module
+        expected_classes = ['Mt5Credential', 'Mt5Config', 'Mt5DataClientConfig', 'Mt5ExecutionClientConfig']
+        missing_classes = [cls for cls in expected_classes if not hasattr(nautilus_adapters_mt5, cls)]
+        if missing_classes:
+            print(f"⚠️ Warning: Missing expected classes in Rust extension: {missing_classes}")
+        else:
+            print("✅ All expected classes are available in the Rust extension")
+            
         return True
-        
+            
     except ImportError as e:
         print(f"Could not import Rust bindings: {e}")
         print("This indicates the Rust extension has not been compiled yet.")
@@ -144,7 +158,7 @@ def compile_rust_extension():
     Compile the Rust extension with Python bindings.
     """
     print("To compile the Rust extension with Python bindings, run:")
-    print("cargo build --release --features python-bindings")
+    print("cargo build -p nautilus-adapters-mt5 --features python-bindings --release")
     print("or for development:")
     print("maturin develop --features python-bindings")
 

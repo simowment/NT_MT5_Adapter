@@ -24,38 +24,52 @@ from pathlib import Path
 
 # Auto-import the PyO3 module from the bindings directory
 try:
-    # Add bindings directory to Python path
-    bindings_dir = Path(__file__).parent / "bindings"
+    # First try to import the PyO3 module directly (after compilation)
+    import nautilus_adapters_mt5
     
-    if bindings_dir.exists():
-        sys.path.insert(0, str(bindings_dir))
-        
-        # Try to import the PyO3 module
-        #TODO: review this
-        print(f"✅ Successfully loaded PyO3 bindings from {bindings_dir}")
-        
-    else:
-        raise ImportError(f"Bindings directory not found: {bindings_dir}")
-        
+    # If successful, we're done
+    print(f"✅ Successfully loaded PyO3 bindings from compiled module")
+    
 except ImportError as e:
     print(f"⚠️  Failed to load PyO3 bindings: {e}")
     print("💡 Make sure to build the adapter with PyO3:")
     print("   cargo build -p nautilus-adapters-mt5 --features python-bindings --release")
     
-    # Create a mock module for development
-    class MockMt5Module:
-        """Mock module for development when PyO3 bindings are not available."""
+    # Try to add the target directory to path where the compiled module would be
+    import os
+    from pathlib import Path
+    
+    # Look for the compiled module in common locations after compilation
+    possible_paths = [
+        Path(__file__).parent / ".." / ".." / ".." / ".." / "target" / "release",  # After cargo build
+        Path(__file__).parent / ".." / ".." / ".." / ".." / "target" / "debug",     # After cargo build --debug
+        Path(__file__).parent / "bindings",  # Alternative location
+    ]
+    
+    for path in possible_paths:
+        if path.exists():
+            sys.path.insert(0, str(path.resolve()))
+            try:
+                import nautilus_adapters_mt5
+                print(f"✅ Successfully loaded PyO3 bindings from {path}")
+                break
+            except ImportError:
+                continue
+    else:
+        # Create a mock module for development
+        class MockMt5Module:
+            """Mock module for development when PyO3 bindings are not available."""
+            
+            @classmethod
+            def __getattr__(cls, name):
+                """Mock any attribute access."""
+                def mock_method(*args, **kwargs):
+                    print(f"🔧 Mock method {name} called with args={args}, kwargs={kwargs}")
+                    return None
+                return mock_method
         
-        @classmethod
-        def __getattr__(cls, name):
-            """Mock any attribute access."""
-            def mock_method(*args, **kwargs):
-                print(f"🔧 Mock method {name} called with args={args}, kwargs={kwargs}")
-                return None
-            return mock_method
-    
-    # Create and expose mock module
-    sys.modules['nautilus_adapters_mt5'] = MockMt5Module()
-    nautilus_adapters_mt5 = sys.modules['nautilus_adapters_mt5']
-    
-    print("📝 Using mock module for development")
+        # Create and expose mock module
+        sys.modules['nautilus_adapters_mt5'] = MockMt5Module()
+        nautilus_adapters_mt5 = sys.modules['nautilus_adapters_mt5']
+        
+        print("📝 Using mock module for development")
