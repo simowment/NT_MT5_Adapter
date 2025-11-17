@@ -1,235 +1,179 @@
-# -*- coding: utf-8 -*-
-"""
-Démonstration de l'utilisation de l'adaptateur MT5 avec des données réelles pour les backtests.
+#!/usr/bin/env python3
+# -------------------------------------------------------------------------------------------------
+#  Copyright (C) 2015-2025 Nautech Systems Pty Ltd. All rights reserved.
+#  https://nautechsystems.io
+#
+#  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
+#  You may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+# -------------------------------------------------------------------------------------------------
 
-Ce script montre comment charger des données historiques réelles de MetaTrader 5
-et les utiliser dans un backtest avec Nautilus Trader.
 """
+Test script for the MetaTrader 5 adapter.
+
+This script demonstrates how to use the MT5 adapter with NautilusTrader.
+"""
+
 import asyncio
+import sys
 from decimal import Decimal
-from datetime import datetime
-from typing import List
-import pandas as pd
 
-# Imports de Nautilus Trader
-from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig
-from nautilus_trader.model.data import Bar, QuoteTick, TradeTick
-from nautilus_trader.model.identifiers import InstrumentId, Venue
-from nautilus_trader.model.objects import Price, Quantity, Money
-from nautilus_trader.model.enums import (
-    AccountType,
-    OMSType,
-    TradeSide
-)
-from nautilus_trader.core.datetime import millis_to_nanos
+try:
+    # Import NautilusTrader components
+    from nautilus_trader.backtest.data_loaders import CSVBarDataLoader
+    from nautilus_trader.backtest.data_loaders import CSVTickDataLoader
+    from nautilus_trader.backtest.engine import BacktestEngine
+    from nautilus_trader.backtest.engine import BacktestEngineConfig
+    from nautilus_trader.config import LiveDataEngineConfig
+    from nautilus_trader.config import LoggingConfig
+    from nautilus_trader.config import RiskEngineConfig
+    from nautilus_trader.examples.strategies.ema_cross import EMACross
+    from nautilus_trader.examples.strategies.ema_cross import EMACrossConfig
+    from nautilus_trader.model.data import BarType
+    from nautilus_trader.model.identifiers import InstrumentId
+    from nautilus_trader.model.identifiers import Symbol
+    from nautilus_trader.model.identifiers import Venue
+    from nautilus_trader.model.objects import Price
+    from nautilus_trader.model.objects import Quantity
+    from nautilus_trader.model.objects import Money
+    from nautilus_trader.model.currency import USD
+    from nautilus_trader.test_kit.providers import TestInstrumentProvider
+    
+    # Import your MT5 adapter components
+    from nautilus_trader.adapters.metatrader5 import Mt5DataClient
+    from nautilus_trader.adapters.metatrader5 import Mt5ExecutionClient
+    from nautilus_trader.adapters.metatrader5 import Mt5InstrumentProvider
+    from nautilus_trader.adapters.metatrader5.config import Mt5DataClientConfig
+    from nautilus_trader.adapters.metatrader5.config import Mt5ExecClientConfig
 
-# Imports de l'adaptateur MT5
+    print("Successfully imported MT5 adapter components")
+    
+except ImportError as e:
+    print(f"Import error: {e}")
+    print("Make sure your MT5 adapter is properly installed and the Rust extension is compiled.")
+    sys.exit(1)
 
-class Mt5BacktestDataLoader:
-    """
-    Chargeur de données pour les backtests avec des données historiques MT5 réelles.
-    """
-    
-    def __init__(self, mt5_client):
-        self.mt5_client = mt5_client
-        
-    def load_historical_bars(self, instrument_id: InstrumentId, start: datetime, end: datetime, timeframe: str = "M1") -> List[Bar]:
-        """
-        Charge des barres historiques depuis MT5 pour le backtest.
-        
-        :param instrument_id: L'identifiant de l'instrument
-        :param start: Date de début
-        :param end: Date de fin  
-        :param timeframe: Timeframe (M1, M5, H1, etc.)
-        :return: Liste de barres
-        """
-        # Dans un scénario réel, cette méthode appellerait l'API MT5 pour récupérer
-        # les données historiques et les convertirait en objets Bar Nautilus
-        print(f"Chargement des données historiques pour {instrument_id} du {start} au {end} (timeframe: {timeframe})")
-        
-        # Simulation de données pour la démonstration
-        # Dans la réalité, vous utiliseriez l'API MT5 pour récupérer les données réelles
-        bars = []
-        current_time = start
-        
-        # Génération de données de démonstration
-        price = 1.1000
-        for i in range(100):  # 100 barres pour la démo
-            open_price = price
-            high_price = price + (0.005 * (i % 3))
-            low_price = price - (0.005 * (i % 2))
-            close_price = price + (0.0001 * ((i + 1) % 2))
-            
-            bar = Bar(
-                bar_type=Bar.bar_type(instrument_id, timeframe, "EXTERNAL"),
-                open=Price(open_price, precision=5),
-                high=Price(high_price, precision=5),
-                low=Price(low_price, precision=5),
-                close=Price(close_price, precision=5),
-                volume=Quantity(1_000, precision=0),
-                ts_event=millis_to_nanos(int(current_time.timestamp() * 1000)),
-                ts_init=millis_to_nanos(int(current_time.timestamp() * 1000)),
-            )
-            
-            bars.append(bar)
-            current_time += pd.Timedelta(minutes=1)
-            price = close_price # Prix de clôture devient le prix de départ suivant
-            
-        return bars
-    
-    def load_historical_quotes(self, instrument_id: InstrumentId, start: datetime, end: datetime) -> List[QuoteTick]:
-        """
-        Charge les ticks de cotation historiques depuis MT5.
-        """
-        print(f"Chargement des quotes historiques pour {instrument_id}")
-        
-        # Simulation de données de démonstration
-        quotes = []
-        current_time = start
-        
-        for i in range(50):  # 50 quotes pour la démo
-            bid_price = 1.1000 + (0.0001 * (i % 10))
-            ask_price = bid_price + 0.0001  # Spread de 1 pip
-            
-            quote = QuoteTick(
-                instrument_id=instrument_id,
-                bid=Price(bid_price, precision=5),
-                ask=Price(ask_price, precision=5),
-                bid_size=Quantity(1_000_000, precision=0),
-                ask_size=Quantity(1_000_000, precision=0),
-                ts_event=millis_to_nanos(int(current_time.timestamp() * 1000)),
-                ts_init=millis_to_nanos(int(current_time.timestamp() * 1000)),
-            )
-            
-            quotes.append(quote)
-            current_time += pd.Timedelta(seconds=10)
-            
-        return quotes
-    
-    def load_historical_trades(self, instrument_id: InstrumentId, start: datetime, end: datetime) -> List[TradeTick]:
-        """
-        Charge les ticks de trade historiques depuis MT5.
-        """
-        print(f"Chargement des trades historiques pour {instrument_id}")
-        
-        # Simulation de données de démonstration
-        trades = []
-        current_time = start
-        
-        for i in range(30):  # 30 trades pour la démo
-            trade = TradeTick(
-                instrument_id=instrument_id,
-                price=Price(1.1000 + (0.0001 * (i % 20)), precision=5),
-                size=Quantity(100_000, precision=0),
-                aggressor_side=TradeSide.BUY if i % 2 == 0 else TradeSide.SELL,
-                trade_id=f"trade_{i}",
-                ts_event=millis_to_nanos(int(current_time.timestamp() * 100)),
-                ts_init=millis_to_nanos(int(current_time.timestamp() * 100)),
-            )
-            
-            trades.append(trade)
-            current_time += pd.Timedelta(seconds=15)
-            
-        return trades
 
-async def run_real_mt5_backtest():
+async def test_mt5_adapter():
     """
-    Exécute un backtest avec des données historiques MT5 réelles.
+    Test the MT5 adapter functionality.
     """
-    print("Initialisation du backtest avec données MT5 réelles...")
+    print("Testing MT5 adapter...")
     
-    # Configuration du moteur de backtest
+    # Configuration for MT5
+    mt5_config = Mt5DataClientConfig(
+        username="your_username",
+        password="your_password", 
+        server="your_server",
+        base_url="http://localhost:8000",
+        ws_url="ws://localhost:8000"
+    )
+    
+    # Create backtest engine
     config = BacktestEngineConfig(
         log_level="INFO",
-        loop_debug=False,
+        bypass_logging=True,
+        run_analysis=False,
     )
     
     engine = BacktestEngine(config=config)
     
     try:
-        # Création d'un instrument de démonstration (dans un vrai scénario, ce serait un instrument MT5 réel)
-        from nautilus_trader.test_kit.providers import TestInstrumentProvider
-        instrument = TestInstrumentProvider.default_fx_ccy("EUR/USD")
-        
-        # Création du loader de données MT5
-        # Note: Dans la réalité, vous auriez un client MT5 pour accéder aux données historiques
-        # Pour cette démo, nous simulons le processus
-        mt5_data_loader = Mt5BacktestDataLoader(mt5_client=None)
-        
-        # Chargement des données historiques MT5
-        start_date = datetime(2022, 1, 1)
-        end_date = datetime(2022, 1, 2)
-        
-        print("Chargement des données historiques MT5...")
-        bars = mt5_data_loader.load_historical_bars(instrument.id, start_date, end_date, "M1")
-        quotes = mt5_data_loader.load_historical_quotes(instrument.id, start_date, end_date)
-        trades = mt5_data_loader.load_historical_trades(instrument.id, start_date, end_date)
-        
-        # Ajout de la venue MT5
-        mt5_venue = Venue("MT5")
+        # Add a venue (for testing purposes)
         engine.add_venue(
-            venue=mt5_venue,
-            oms_type=OMSType.HEDGING,
-            account_type=AccountType.MARGIN,
-            base_currency=instrument.base_currency,
-            starting_balances=[Money(100_000, instrument.base_currency)],
+            venue=Venue("SIM"),
+            oms_type="HEDGING",
+            account_type="MARGIN",
+            base_currency=None,
+            starting_balances=[Money(1_000_000, USD)],
         )
         
-        # Ajout de l'instrument
+        # Load instruments (for testing)
+        instrument = TestInstrumentProvider.default()
         engine.add_instrument(instrument)
         
-        # Ajout des données de backtest (bars, quotes, trades)
-        print("Ajout des données de backtest...")
-        for bar in bars:
-            engine.add_data([bar], mt5_venue)
-        
-        for quote in quotes:
-            engine.add_data([quote], mt5_venue)
-        
-        for trade in trades:
-            engine.add_data([trade], mt5_venue)
-        
-        # Création d'une stratégie simple pour le backtest
-        from nautilus_trader.test_kit.strategies import EMACross
-        strategy = EMACross(
-            instrument_id=instrument.id,
-            bar_type=Bar.bar_type(instrument.id, "1-MINUTE", "EXTERNAL"),
+        # Add your strategy
+        strategy_config = EMACrossConfig(
+            instrument_id=instrument.id.value,
+            bar_type=f"{instrument.id.value}-1-MINUTE-LAST-INTERNAL",
             trade_size=Decimal("1000"),
-            fast_ema_period=10,
-            slow_ema_period=20,
         )
-        
+        strategy = EMACross(config=strategy_config)
         engine.add_strategy(strategy)
         
-        print("Exécution du backtest...")
-        engine.run()
-        
-        print("Backtest terminé avec succès!")
-        print(f"Résultats: {engine.iteration} itérations")
-        
-        # Affichage des résultats du portefeuille
-        portfolio = engine.portfolio
-        print(f"Valeur du portefeuille finale: {portfolio.unrealized_pnl(instrument.id)}")
+        print("MT5 adapter test setup completed successfully")
+        print("Note: This test only verifies import and basic setup.")
+        print("For full functionality, you need a running MT5 bridge service.")
         
     finally:
         await engine.dispose()
 
 
+def test_rust_bindings():
+    """
+    Test the Rust bindings for MT5 adapter.
+    """
+    print("Testing Rust bindings...")
+    
+    try:
+        # Try to import the Rust extension
+        import nautilus_adapters_mt5
+        
+        print(f"Successfully imported Rust extension: {nautilus_adapters_mt5.__version__}")
+        
+        # List available classes in the Rust extension
+        available_classes = [attr for attr in dir(nautilus_adapters_mt5) if not attr.startswith('_')]
+        print(f"Available classes in Rust extension: {available_classes}")
+        
+        return True
+        
+    except ImportError as e:
+        print(f"Could not import Rust bindings: {e}")
+        print("This indicates the Rust extension has not been compiled yet.")
+        return False
+
+
+def compile_rust_extension():
+    """
+    Compile the Rust extension with Python bindings.
+    """
+    print("To compile the Rust extension with Python bindings, run:")
+    print("cargo build --release --features python-bindings")
+    print("or for development:")
+    print("maturin develop --features python-bindings")
+
+
+def main():
+    """
+    Main entry point for testing the MT5 adapter.
+    """
+    print("=" * 60)
+    print("MT5 Adapter Test Script")
+    print("=" * 60)
+    
+    # Test Rust bindings first
+    bindings_ok = test_rust_bindings()
+    
+    if not bindings_ok:
+        print("\nRust bindings not available. Compiling instructions:")
+        compile_rust_extension()
+        print("\nAfter compilation, run this script again.")
+        return
+    
+    print("\nStarting async test...")
+    try:
+        asyncio.run(test_mt5_adapter())
+    except Exception as e:
+        print(f"Error during async test: {e}")
+        import traceback
+        traceback.print_exc()
+
 
 if __name__ == "__main__":
-    print("Démonstration de l'utilisation de l'adaptateur MT5 avec données réelles pour backtest")
-    print("=" * 80)
-    
-    print("\n" + "=" * 80)
-    print("Exécution du backtest de démonstration avec données MT5 simulées...")
-    
-    # Exécution du backtest
-    asyncio.run(run_real_mt5_backtest())
-    
-    print("\nDémonstration terminée avec succès!")
-    print("\nPOUR UTILISER AVEC DES DONNÉES MT5 RÉELLES:")
-    print("1. Assurez-vous que le serveur MT5 Bridge est en cours d'exécution")
-    print("2. Compilez l'adaptateur MT5: cargo build -p nautilus-adapters-mt5")
-    print("3. Configurez les identifiants MT5 dans la configuration")
-    print("4. Utilisez les méthodes de chargement de données pour récupérer les données historiques MT5")
-
+    main()
