@@ -1,4 +1,7 @@
 //! MT5 Instrument Provider implementation.
+//! 
+//! This module implements the instrument provider for the MT5 adapter,
+//! following the specifications in the adapter documentation.
 
 use crate::config::{Mt5Config, Mt5InstrumentProviderConfig};
 use crate::http::client::Mt5HttpClient;
@@ -6,9 +9,18 @@ use crate::http::error::{Mt5HttpError};
 use crate::common::parse::InstrumentMetadata;
 use crate::common::credential::Mt5Credential;
 use crate::common::urls::Mt5Url;
+use crate::common::parse::InstrumentType;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
+
+// Filter types for instrument loading
+#[derive(Debug, Clone, PartialEq)]
+pub enum InstrumentFilter {
+    Symbol(String),
+    Venue(String),
+    Type(InstrumentType),
+}
 
 #[derive(Debug, Error)]
 pub enum InstrumentProviderError {
@@ -31,9 +43,6 @@ impl From<String> for InstrumentProviderError {
         InstrumentProviderError::ParseError(s)
     }
 }
-
-// Remove the problematic conversion implementation
-// We'll handle the error conversion differently
 
 #[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
@@ -88,7 +97,103 @@ impl Mt5InstrumentProvider {
         })
     }
 
-    pub async fn discover_instruments(&self) -> Result<Vec<Instrument>, InstrumentProviderError> {
+    /// Loads all instruments asynchronously, optionally applying filters.
+    ///
+    /// # Arguments
+    /// * `filters` - Optional filters to apply to the instrument list
+    ///
+    /// # Returns
+    /// A `Result` containing a `Vec` of loaded instruments or an `InstrumentProviderError`
+    pub async fn load_all_async(&self, filters: Option<Vec<InstrumentFilter>>) -> Result<Vec<Instrument>, InstrumentProviderError> {
+        let instruments = self.discover_instruments().await?;
+        
+        // Apply filters if provided
+        let filtered_instruments = if let Some(filters) = filters {
+            instruments.into_iter()
+                .filter(|instrument| self.matches_filters(instrument, &filters))
+                .collect()
+        } else {
+            instruments
+        };
+        
+        Ok(filtered_instruments)
+    }
+
+    /// Loads specific instruments by their IDs asynchronously.
+    ///
+    /// # Arguments
+    /// * `instrument_ids` - List of instrument IDs to load
+    /// * `filters` - Optional filters to apply to the instrument list
+    ///
+    /// # Returns
+    /// A `Result` containing a `Vec` of loaded instruments or an `InstrumentProviderError`
+    pub async fn load_ids_async(&self, instrument_ids: Vec<InstrumentId>, filters: Option<Vec<InstrumentFilter>>) -> Result<Vec<Instrument>, InstrumentProviderError> {
+        let all_instruments = self.discover_instruments().await?;
+        
+        // Filter by instrument IDs
+        let mut filtered_instruments: Vec<Instrument> = all_instruments.into_iter()
+            .filter(|instrument| instrument_ids.contains(instrument.instrument_id()))
+            .collect();
+        
+        // Apply additional filters if provided
+        if let Some(filters) = filters {
+            filtered_instruments.retain(|instrument| self.matches_filters(instrument, &filters));
+        }
+        
+        Ok(filtered_instruments)
+    }
+
+    /// Loads a single instrument by its ID asynchronously.
+    ///
+    /// # Arguments
+    /// * `instrument_id` - The ID of the instrument to load
+    /// * `filters` - Optional filters to apply to the instrument
+    ///
+    /// # Returns
+    /// A `Result` containing the loaded instrument or an `InstrumentProviderError`
+    pub async fn load_async(&self, instrument_id: InstrumentId, filters: Option<Vec<InstrumentFilter>>) -> Result<Instrument, InstrumentProviderError> {
+        let instruments = self.load_ids_async(vec![instrument_id], filters).await?;
+        
+        instruments.into_iter()
+            .next()
+            .ok_or_else(|| InstrumentProviderError::ParseError("Instrument not found".to_string()))
+    }
+
+    /// Helper method to check if an instrument matches the provided filters.
+    ///
+    /// # Arguments
+    /// * `instrument` - The instrument to check
+    /// * `filters` - List of filters to apply
+    ///
+    /// # Returns
+    /// `true` if the instrument matches all filters, `false` otherwise
+    fn matches_filters(&self, instrument: &Instrument, filters: &[InstrumentFilter]) -> bool {
+        for filter in filters {
+            match filter {
+                InstrumentFilter::Symbol(symbol) => {
+                    if instrument.instrument_id().symbol != *symbol {
+                        return false;
+                    }
+                },
+                InstrumentFilter::Venue(venue) => {
+                    if instrument.instrument_id().venue != *venue {
+                        return false;
+                    }
+                },
+                InstrumentFilter::Type(_instrument_type) => {
+                    // This would need to be implemented based on the actual instrument type
+                    // For now, we'll assume all instruments match
+                },
+            }
+        }
+        true
+    }
+
+    /// Discovers all instruments from the MT5 server.
+    ///
+    /// # Returns
+    /// A `Result` containing a `Vec` of discovered instruments or an `InstrumentProviderError`
+    async fn discover_instruments(&self) -> Result<Vec<Instrument>, InstrumentProviderError> {
         // Get all symbols from MT5
         let body = serde_json::json!({});
         let response = self.http_client.symbols_get(&body).await
@@ -109,7 +214,7 @@ impl Mt5InstrumentProvider {
                 volume_max: symbol.volume_max,
                 volume_step: symbol.volume_step,
                 contract_size: symbol.contract_size,
-                instrument_type: crate::common::parse::InstrumentType::CurrencyPair {
+                instrument_type: InstrumentType::CurrencyPair {
                     base_currency: "BASE".to_string(),
                     quote_currency: "QUOTE".to_string(),
                 },
@@ -131,6 +236,10 @@ impl Mt5InstrumentProvider {
         Ok(instruments_converted)
     }
 
+    /// Loads all instruments (legacy method for backward compatibility).
+    ///
+    /// # Returns
+    /// A `Result` containing a unit type or an `InstrumentProviderError`
     pub async fn load_instruments(&self) -> Result<(), InstrumentProviderError> {
         let instruments = self.discover_instruments().await?;
         
@@ -139,6 +248,21 @@ impl Mt5InstrumentProvider {
         }
         
         Ok(())
+    }
+
+    pub fn create_instrument(&self, metadata: &InstrumentMetadata) -> Result<Instrument, InstrumentProviderError> {
+        let instrument_id = InstrumentId::from_str(&metadata.symbol)
+            .map_err(|e| InstrumentProviderError::ParseError(e.to_string()))?;
+        
+        let price = Price::new(0.0, metadata.digits); // Using 0.0 as placeholder price
+        
+        Ok(Instrument::new(
+            instrument_id,
+            price,
+            metadata.volume_min,
+            metadata.volume_max,
+            metadata.volume_step,
+        ))
     }
 }
 
@@ -150,12 +274,75 @@ impl Mt5InstrumentProvider {
         Self::new(config).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
-    pub async fn discover_instruments(&self) -> Result<Vec<Instrument>, PyErr> {
-        self.discover_instruments().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    /// Loads all instruments asynchronously, optionally applying filters.
+    /// 
+    /// # Arguments
+    /// * `filters` - Optional filters to apply to the instrument list
+    /// 
+    /// # Returns
+    /// A list of loaded instruments
+    #[pyo3(name = "load_all_async")]
+    pub fn load_all_async_py(&self, filters: Option<Vec<InstrumentFilter>>) -> PyResult<PyObject> {
+        use pyo3_async_runtimes::tokio::future_into_py;
+        future_into_py(self.py().unwrap(), async move {
+            self.load_all_async(filters).await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
     }
 
-    pub async fn load_instruments(&self) -> Result<(), PyErr> {
-        self.load_instruments().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    /// Loads specific instruments by their IDs asynchronously.
+    /// 
+    /// # Arguments
+    /// * `instrument_ids` - List of instrument IDs to load
+    /// * `filters` - Optional filters to apply to the instrument list
+    /// 
+    /// # Returns
+    /// A list of loaded instruments
+    #[pyo3(name = "load_ids_async")]
+    pub fn load_ids_async_py(&self, instrument_ids: Vec<InstrumentId>, filters: Option<Vec<InstrumentFilter>>) -> PyResult<PyObject> {
+        use pyo3_async_runtimes::tokio::future_into_py;
+        future_into_py(self.py().unwrap(), async move {
+            self.load_ids_async(instrument_ids, filters).await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
+    /// Loads a single instrument by its ID asynchronously.
+    /// 
+    /// # Arguments
+    /// * `instrument_id` - The ID of the instrument to load
+    /// * `filters` - Optional filters to apply to the instrument
+    /// 
+    /// # Returns
+    /// The loaded instrument
+    #[pyo3(name = "load_async")]
+    pub fn load_async_py(&self, instrument_id: InstrumentId, filters: Option<Vec<InstrumentFilter>>) -> PyResult<PyObject> {
+        use pyo3_async_runtimes::tokio::future_into_py;
+        future_into_py(self.py().unwrap(), async move {
+            self.load_async(instrument_id, filters).await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
+    /// Discovers all instruments from the MT5 server (legacy method).
+    /// 
+    /// # Returns
+    /// A list of discovered instruments
+    #[pyo3(name = "discover_instruments")]
+    pub fn discover_instruments_py(&self) -> PyResult<PyObject> {
+        use pyo3_async_runtimes::tokio::future_into_py;
+        future_into_py(self.py().unwrap(), async move {
+            self.discover_instruments().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
+    /// Loads all instruments (legacy method for backward compatibility).
+    /// 
+    /// # Returns
+    /// A unit type indicating successful loading
+    #[pyo3(name = "load_instruments")]
+    pub fn load_instruments_py(&self) -> PyResult<PyObject> {
+        use pyo3_async_runtimes::tokio::future_into_py;
+        future_into_py(self.py().unwrap(), async move {
+            self.load_instruments().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
     }
 }
 

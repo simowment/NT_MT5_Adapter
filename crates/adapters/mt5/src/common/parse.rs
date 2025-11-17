@@ -153,7 +153,7 @@ pub fn parse_instrument_metadata(obj: &Value) -> Result<InstrumentMetadata, Pars
     })
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InstrumentType {
     CurrencyPair {
         base_currency: String,
