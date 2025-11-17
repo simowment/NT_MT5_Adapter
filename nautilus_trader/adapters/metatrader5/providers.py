@@ -107,8 +107,7 @@ class Mt5InstrumentProvider(InstrumentProvider):
         """
         from nautilus_trader.model.instruments import CurrencyPair
         from nautilus_trader.model.objects import Currency
-        from nautilus_trader.model.enums import AssetClass
-        from nautilus_trader.model.identifiers import InstrumentId, Symbol, Venue
+        from nautilus_trader.model.identifiers import InstrumentId, Symbol
 
         # Create currency pair instrument from MT5 symbol data
         # Note: This is a simplified implementation - in reality, you'd need to handle
