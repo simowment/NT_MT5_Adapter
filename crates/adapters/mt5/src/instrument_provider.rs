@@ -51,6 +51,7 @@ use pyo3::prelude::*;
 #[derive(Clone, Debug)]
 #[pyclass]
 pub struct Mt5InstrumentProvider {
+    #[cfg_attr(feature = "python-bindings", pyo3(get))]
     config: Mt5InstrumentProviderConfig,
     http_client: Arc<Mt5HttpClient>,
     cache: Arc<RwLock<Vec<InstrumentMetadata>>>,
@@ -58,7 +59,7 @@ pub struct Mt5InstrumentProvider {
 
 #[cfg(not(feature = "python-bindings"))]
 pub struct Mt5InstrumentProvider {
-    config: Mt5InstrumentProviderConfig,
+    pub config: Mt5InstrumentProviderConfig,
     http_client: Arc<Mt5HttpClient>,
     cache: Arc<RwLock<Vec<InstrumentMetadata>>>,
 }

@@ -68,7 +68,7 @@ impl Mt5Credential {
 #[derive(Debug, Clone)]
 pub struct Mt5SignedCredential {
     pub api_key: String,
-    api_secret: String, // Store as String for now, can be converted to bytes when needed
+    pub api_secret: String, // Store as String for now, can be converted to bytes when needed
 }
 
 impl Mt5SignedCredential {
@@ -83,7 +83,7 @@ impl Mt5SignedCredential {
 
     /// Signs a request message according to the BitMEX authentication scheme.
     #[must_use]
-    pub fn sign(&self, verb: &str, endpoint: &str, expires: i64, data: &str) -> String {
+    pub fn sign(&self, _verb: &str, _endpoint: &str, _expires: i64, _data: &str) -> String {
         // This is a placeholder implementation
         // In a real implementation, you would use HMAC SHA256 as shown in the BitMEX example
         // For now, we'll just return an empty string to avoid compilation errors

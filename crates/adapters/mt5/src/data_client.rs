@@ -49,13 +49,14 @@ use pyo3::prelude::*;
 #[derive(Clone, Debug)]
 #[pyclass]
 pub struct Mt5DataClient {
+    #[cfg_attr(feature = "python-bindings", pyo3(get))]
     config: Mt5DataClientConfig,
     http_client: Arc<Mt5HttpClient>,
 }
 
 #[cfg(not(feature = "python-bindings"))]
 pub struct Mt5DataClient {
-    config: Mt5DataClientConfig,
+    pub config: Mt5DataClientConfig,
     http_client: Arc<Mt5HttpClient>,
 }
 
@@ -86,12 +87,7 @@ impl Mt5DataClient {
 
     /// Performs a login to validate connectivity with the MT5 bridge.
     pub async fn connect(&self) -> Result<(), DataClientError> {
-        let login_body = serde_json::json!({
-            "login": self.config.credential.login,
-            "password": self.config.credential.password,
-            "server": self.config.credential.server,
-        });
-        let _response = self.http_client.login().await.map_err(|e| DataClientError::ConnectionError(e.to_string()))?;
+        self.http_client.login().await.map_err(|e| DataClientError::ConnectionError(e.to_string()))?;
         Ok(())
     }
 

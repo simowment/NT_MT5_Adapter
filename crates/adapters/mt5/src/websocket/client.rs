@@ -73,7 +73,9 @@ impl WebSocketError {
 // Designed to be cloned and shared between tasks (Arc<Mutex<>>).
 #[cfg_attr(feature = "python-bindings", pyclass)]
 pub struct Mt5WebSocketClient {
+    #[cfg_attr(feature = "python-bindings", pyo3(get))]
     credential: Mt5Credential,
+    #[cfg_attr(feature = "python-bindings", pyo3(get))]
     url: String,
     authenticated: Arc<Mutex<bool>>,
     pending_subscriptions: Arc<Mutex<HashSet<String>>>,
@@ -90,6 +92,14 @@ impl Mt5WebSocketClient {
             pending_subscriptions: Arc::new(Mutex::new(HashSet::new())),
             confirmed_subscriptions: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+
+    pub fn credential(&self) -> &Mt5Credential {
+        &self.credential
+    }
+
+    pub fn url(&self) -> &String {
+        &self.url
     }
 
     pub async fn connect(&self) -> Result<(), WebSocketError> {

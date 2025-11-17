@@ -49,13 +49,14 @@ use pyo3::prelude::*;
 #[derive(Clone, Debug)]
 #[pyclass]
 pub struct Mt5ExecutionClient {
+    #[cfg_attr(feature = "python-bindings", pyo3(get))]
     config: Mt5ExecutionClientConfig,
     http_client: Arc<Mt5HttpClient>,
 }
 
 #[cfg(not(feature = "python-bindings"))]
 pub struct Mt5ExecutionClient {
-    config: Mt5ExecutionClientConfig,
+    pub config: Mt5ExecutionClientConfig,
     http_client: Arc<Mt5HttpClient>,
 }
 
