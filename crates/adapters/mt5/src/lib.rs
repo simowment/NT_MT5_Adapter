@@ -28,6 +28,7 @@ pub mod data;
 pub mod error;
 pub mod execution;
 pub mod http;
+pub mod websocket;
 
 // MT5 client modules
 pub mod data_client;

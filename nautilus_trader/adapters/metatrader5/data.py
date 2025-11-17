@@ -24,7 +24,7 @@ from nautilus_trader.model.data import BarType
 from nautilus_trader.model.data import DataType
 from nautilus_trader.model.identifiers import ClientId, InstrumentId
 
-# Import pour gestion d'erreurs MT5
+# Import for MT5 error handling
 import traceback
 import logging
 from typing import Optional
@@ -80,18 +80,18 @@ class Mt5DataClient(LiveMarketDataClient):
         self._ws_client = ws_client
         self._connected = False
         
-        # Configuration du logging MT5
+        # MT5 logging configuration
         self._setup_mt5_logging()
 
     def _setup_mt5_logging(self):
-        """Configure le logging pour l'adaptateur MT5."""
-        # Configurer le niveau de log basé sur la configuration
+        """Configure logging for the MT5 adapter."""
+        # Configure log level based on configuration
         if hasattr(self, '_config') and hasattr(self._config, 'enable_logging'):
             log_level = logging.DEBUG if self._config.enable_logging else logging.INFO
         else:
             log_level = logging.INFO
             
-        # Ajouter un handler spécialisé pour MT5
+        # Add specialized handler for MT5
         mt5_logger = logging.getLogger("nautilus_trader.adapters.mt5.data")
         if not mt5_logger.handlers:
             handler = logging.StreamHandler()
@@ -103,33 +103,33 @@ class Mt5DataClient(LiveMarketDataClient):
             mt5_logger.setLevel(log_level)
 
     def _log_connection_error(self, error: Exception, operation: str):
-        """Log les erreurs de connexion avec contexte détaillé."""
+        """Log connection errors with detailed context."""
         self._log.error(f"MT5 Connection Error during {operation}: {error}")
         self._log.error(f"Error type: {type(error).__name__}")
         self._log.error(f"Error details: {str(error)}")
         
-        # Log le stack trace complet pour le debugging
+        # Log full stack trace for debugging
         if hasattr(self, '_config') and self._config.enable_logging:
             self._log.debug(f"Stack trace: {traceback.format_exc()}")
 
     def _log_subscription_error(self, error: Exception, instrument_id: InstrumentId, subscription_type: str):
-        """Log les erreurs de subscription avec contexte."""
+        """Log subscription errors with context."""
         self._log.error(f"MT5 Subscription Error for {instrument_id} ({subscription_type}): {error}")
         self._log.error(f"Subscription details: {subscription_type}")
         
-        # Log les tentatives de retry si configuré
+        # Log retry attempts if configured
         if hasattr(self, '_config') and hasattr(self._config, 'connection_retry_attempts'):
             self._log.info(f"Will retry up to {self._config.connection_retry_attempts} times")
 
     def _handle_mt5_error(self, error: Exception, context: str, raise_error: bool = True) -> Optional[Exception]:
-        """Gestion centralisée des erreurs MT5."""
+        """Centralized MT5 error handling."""
         error_type = type(error).__name__
         
-        # Log l'erreur avec contexte
+        # Log error with context
         self._log.error(f"MT5 Error in {context}: {error}")
         self._log.error(f"Error type: {error_type}")
         
-        # Mapping des erreurs vers des exceptions MT5 appropriées
+        # Map errors to appropriate MT5 exceptions
         if "connection" in str(error).lower() or "timeout" in str(error).lower():
             wrapped_error = Mt5ConnectionError(f"MT5 connection failed during {context}: {error}")
         elif "subscription" in str(error).lower() or "subscribe" in str(error).lower():
@@ -141,7 +141,7 @@ class Mt5DataClient(LiveMarketDataClient):
         else:
             wrapped_error = Mt5DataError(f"MT5 error during {context}: {error}")
         
-        # Log les détails supplémentaires
+        # Log additional details
         if hasattr(self, '_config') and self._config.enable_logging:
             self._log.debug(f"Original error details: {str(error)}")
             self._log.debug(f"Stack trace: {traceback.format_exc()}")
@@ -154,12 +154,12 @@ class Mt5DataClient(LiveMarketDataClient):
     def connect(self):
         self._log.info("Connecting to MT5...")
         try:
-            # Authentification HTTP
+            # HTTP authentication
             import asyncio
             loop = asyncio.get_event_loop()
             loop.run_until_complete(self._http_client.login())
             
-            # Connexion WebSocket
+            # WebSocket connection
             loop.run_until_complete(self._ws_client.connect())
             loop.run_until_complete(self._ws_client.authenticate())
             
