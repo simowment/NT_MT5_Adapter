@@ -68,7 +68,7 @@ class Mt5ExecutionClient(LiveExecutionClient):
     and should delegate to the Rust MT5 HTTP/WS clients exposed via PyO3.
     """
 
-    def __init__(self, loop, http_client, ws_client, msgbus, cache, clock):
+    def __init__(self, loop, http_client, msgbus, cache, clock):
         super().__init__(
             client_id=ClientId("MT5"),
             venue=Venue("MT5"),
@@ -79,10 +79,8 @@ class Mt5ExecutionClient(LiveExecutionClient):
         )
 
         PyCondition.not_none(http_client, "http_client")
-        PyCondition.not_none(ws_client, "ws_client")
 
         self._http_client = http_client
-        self._ws_client = ws_client
         self._connected = False
 
     def connect(self):
@@ -92,10 +90,6 @@ class Mt5ExecutionClient(LiveExecutionClient):
             import asyncio
             loop = asyncio.get_event_loop()
             loop.run_until_complete(self._http_client.login())
-            
-            # WebSocket connection
-            loop.run_until_complete(self._ws_client.connect())
-            loop.run_until_complete(self._ws_client.authenticate())
             
             self._connected = True
             self._log.info("Connected to MT5 successfully.")
@@ -107,10 +101,6 @@ class Mt5ExecutionClient(LiveExecutionClient):
         self._log.info("Disconnecting from MT5...")
         if self._connected:
             try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                if self._ws_client:
-                    loop.run_until_complete(self._ws_client.disconnect())
                 self._connected = False
                 self._log.info("Disconnected from MT5.")
             except Exception as e:

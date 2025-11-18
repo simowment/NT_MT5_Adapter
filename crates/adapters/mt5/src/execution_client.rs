@@ -85,9 +85,7 @@ impl Mt5ExecutionClient {
         let url = Mt5Url::new(&config.base_url);
         let http_config = Mt5Config {
             base_url: config.base_url.clone(),
-            ws_url: "ws://localhost:8000".to_string(), // Default WebSocket URL
             http_timeout: config.http_timeout,
-            ws_timeout: 30, // Default value since config doesn't have ws_timeout
             proxy: None,
         };
         

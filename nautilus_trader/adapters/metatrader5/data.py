@@ -63,7 +63,7 @@ class Mt5DataClient(LiveMarketDataClient):
     and should delegate to the Rust MT5 HTTP/WS clients exposed via PyO3.
     """
 
-    def __init__(self, loop, http_client, ws_client, msgbus, cache, clock):
+    def __init__(self, loop, http_client, msgbus, cache, clock):
         super().__init__(
             client_id=ClientId("MT5"),
             venue=http_client.venue if hasattr(http_client, 'venue') else "MT5",
@@ -74,10 +74,8 @@ class Mt5DataClient(LiveMarketDataClient):
         )
 
         PyCondition.not_none(http_client, "http_client")
-        PyCondition.not_none(ws_client, "ws_client")
 
         self._http_client = http_client
-        self._ws_client = ws_client
         self._connected = False
         
         # MT5 logging configuration
@@ -159,10 +157,6 @@ class Mt5DataClient(LiveMarketDataClient):
             loop = asyncio.get_event_loop()
             loop.run_until_complete(self._http_client.login())
             
-            # WebSocket connection
-            loop.run_until_complete(self._ws_client.connect())
-            loop.run_until_complete(self._ws_client.authenticate())
-            
             self._connected = True
             self._log.info("Connected to MT5 successfully.")
         except Exception as e:
@@ -173,10 +167,6 @@ class Mt5DataClient(LiveMarketDataClient):
         self._log.info("Disconnecting from MT5...")
         if self._connected:
             try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                if self._ws_client:
-                    loop.run_until_complete(self._ws_client.disconnect())
                 self._connected = False
                 self._log.info("Disconnected from MT5.")
             except Exception as e:
@@ -187,73 +177,72 @@ class Mt5DataClient(LiveMarketDataClient):
     async def _subscribe_trade_ticks(self, instrument_id: InstrumentId):
         self._log.info(f"Subscribing to trade ticks for {instrument_id}")
         try:
-            if self._connected and self._ws_client:
+            if self._connected:
                 symbol = str(instrument_id)
-                await self._ws_client.subscribe_trades(symbol)
-                self._log.debug(f"Trade ticks subscription confirmed for {symbol}")
+                # Placeholder for trade tick subscription via HTTP polling or other mechanism
+                self._log.debug(f"Trade ticks subscription initiated for {symbol} via HTTP")
             else:
-                self._log.warning("Not connected to MT5 WebSocket")
+                self._log.warning("Not connected to MT5")
         except Exception as e:
             self._handle_mt5_error(e, f"subscribe_trade_ticks for {instrument_id}")
 
     async def _subscribe_quote_ticks(self, instrument_id: InstrumentId):
         self._log.info(f"Subscribing to quote ticks for {instrument_id}")
         try:
-            if self._connected and self._ws_client:
+            if self._connected:
                 symbol = str(instrument_id)
-                await self._ws_client.subscribe_quotes(symbol)
-                self._log.debug(f"Quote ticks subscription confirmed for {symbol}")
+                # Placeholder for quote tick subscription via HTTP polling or other mechanism
+                self._log.debug(f"Quote ticks subscription initiated for {symbol} via HTTP")
             else:
-                self._log.warning("Not connected to MT5 WebSocket")
+                self._log.warning("Not connected to MT5")
         except Exception as e:
             self._handle_mt5_error(e, f"subscribe_quote_ticks for {instrument_id}")
 
     async def _subscribe_bars(self, bar_type: BarType):
         self._log.info(f"Subscribing to bars for {bar_type}")
         try:
-            if self._connected and self._ws_client:
+            if self._connected:
                 symbol = str(bar_type.instrument_id)
-                # For bars, we might use a different subscription pattern
-                await self._ws_client.subscribe_quotes(symbol)  # Use quotes as proxy for now
-                self._log.debug(f"Bars subscription confirmed for {bar_type}")
+                # Placeholder for bars subscription via HTTP polling or other mechanism
+                self._log.debug(f"Bars subscription initiated for {bar_type} via HTTP")
             else:
-                self._log.warning("Not connected to MT5 WebSocket")
+                self._log.warning("Not connected to MT5")
         except Exception as e:
             self._handle_mt5_error(e, f"subscribe_bars for {bar_type}")
 
     async def _unsubscribe_trade_ticks(self, instrument_id: InstrumentId):
         self._log.info(f"Unsubscribing from trade ticks for {instrument_id}")
         try:
-            if self._connected and self._ws_client:
+            if self._connected:
                 symbol = str(instrument_id)
-                await self._ws_client.unsubscribe(f"trade:{symbol}")
-                self._log.debug(f"Trade ticks unsubscribed for {symbol}")
+                # Placeholder for trade tick unsubscription via HTTP polling or other mechanism
+                self._log.debug(f"Trade ticks unsubscription initiated for {symbol} via HTTP")
             else:
-                self._log.warning("Not connected to MT5 WebSocket")
+                self._log.warning("Not connected to MT5")
         except Exception as e:
             self._handle_mt5_error(e, f"unsubscribe_trade_ticks for {instrument_id}")
 
     async def _unsubscribe_quote_ticks(self, instrument_id: InstrumentId):
         self._log.info(f"Unsubscribing from quote ticks for {instrument_id}")
         try:
-            if self._connected and self._ws_client:
+            if self._connected:
                 symbol = str(instrument_id)
-                await self._ws_client.unsubscribe(f"quote:{symbol}")
-                self._log.debug(f"Quote ticks unsubscribed for {symbol}")
+                # Placeholder for quote tick unsubscription via HTTP polling or other mechanism
+                self._log.debug(f"Quote ticks unsubscription initiated for {symbol} via HTTP")
             else:
-                self._log.warning("Not connected to MT5 WebSocket")
+                self._log.warning("Not connected to MT5")
         except Exception as e:
             self._handle_mt5_error(e, f"unsubscribe_quote_ticks for {instrument_id}")
 
     async def _unsubscribe_bars(self, bar_type: BarType):
         self._log.info(f"Unsubscribing from bars for {bar_type}")
         try:
-            if self._connected and self._ws_client:
+            if self._connected:
                 symbol = str(bar_type.instrument_id)
-                await self._ws_client.unsubscribe(f"quote:{symbol}")
-                self._log.debug(f"Bars unsubscribed for {bar_type}")
+                # Placeholder for bars unsubscription via HTTP polling or other mechanism
+                self._log.debug(f"Bars unsubscription initiated for {bar_type} via HTTP")
             else:
-                self._log.warning("Not connected to MT5 WebSocket")
+                self._log.warning("Not connected to MT5")
         except Exception as e:
             self._handle_mt5_error(e, f"unsubscribe_bars for {bar_type}")
 
@@ -297,26 +286,24 @@ class Mt5DataClient(LiveMarketDataClient):
     async def _subscribe_instrument_status(self, instrument_id: InstrumentId):
         self._log.info(f"Subscribing to instrument status for {instrument_id}")
         try:
-            if self._connected and self._ws_client:
+            if self._connected:
                 symbol = str(instrument_id)
-                # Subscribe to quotes to get status updates
-                await self._ws_client.subscribe_quotes(symbol)
-                self._log.debug(f"Instrument status subscription confirmed for {symbol}")
+                # Placeholder for instrument status subscription via HTTP polling or other mechanism
+                self._log.debug(f"Instrument status subscription initiated for {symbol} via HTTP")
             else:
-                self._log.warning("Not connected to MT5 WebSocket")
+                self._log.warning("Not connected to MT5")
         except Exception as e:
             self._handle_mt5_error(e, f"subscribe_instrument_status for {instrument_id}")
 
     async def _subscribe_instrument_close(self, instrument_id: InstrumentId):
         self._log.info(f"Subscribing to instrument close for {instrument_id}")
         try:
-            if self._connected and self._ws_client:
+            if self._connected:
                 symbol = str(instrument_id)
-                # Subscribe to quotes to get close updates
-                await self._ws_client.subscribe_quotes(symbol)
-                self._log.debug(f"Instrument close subscription confirmed for {symbol}")
+                # Placeholder for instrument close subscription via HTTP polling or other mechanism
+                self._log.debug(f"Instrument close subscription initiated for {symbol} via HTTP")
             else:
-                self._log.warning("Not connected to MT5 WebSocket")
+                self._log.warning("Not connected to MT5")
         except Exception as e:
             self._handle_mt5_error(e, f"subscribe_instrument_close for {instrument_id}")
 

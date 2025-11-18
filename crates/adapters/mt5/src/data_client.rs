@@ -65,9 +65,7 @@ impl Mt5DataClient {
     pub fn new(config: Mt5DataClientConfig) -> Result<Self, DataClientError> {
         let http_config = Mt5Config {
             base_url: config.base_url.clone(),
-            ws_url: config.ws_url.clone().unwrap_or_default(),
             http_timeout: config.http_timeout,
-            ws_timeout: 30, // Default value since config doesn't have ws_timeout
             proxy: None,
         };
 

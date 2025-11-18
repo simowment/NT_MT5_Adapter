@@ -37,7 +37,6 @@ class BaseMt5Config:
         mt5_host: str = "127.0.0.1",
         mt5_port: int = 8080,
         mt5_base_url: Optional[str] = None,
-        mt5_ws_url: Optional[str] = None,
         mt5_login: Optional[str] = None,
         mt5_password: Optional[str] = None,
         mt5_server: Optional[str] = None,
@@ -54,8 +53,6 @@ class BaseMt5Config:
             The MT5 port number.
         mt5_base_url : str, optional
             The base URL for MT5 API (overrides host/port).
-        mt5_ws_url : str, optional
-            The WebSocket URL for MT5 streaming.
         mt5_login : str, optional
             The MT5 account login.
         mt5_password : str, optional
@@ -68,7 +65,6 @@ class BaseMt5Config:
         self.mt5_host = mt5_host
         self.mt5_port = mt5_port
         self.mt5_base_url = mt5_base_url or f"http://{mt5_host}:{mt5_port}"
-        self.mt5_ws_url = mt5_ws_url or f"ws://{mt5_host}:{mt5_port}"
         self.mt5_login = mt5_login
         self.mt5_password = mt5_password
         self.mt5_server = mt5_server
@@ -87,8 +83,6 @@ class Mt5InstrumentProviderConfig(BaseMt5Config):
         The MetaTrader 5 port for the REST API.
     mt5_base_url : str
         The full base URL for the MT5 API (overrides host/port).
-    mt5_ws_url : str
-        The WebSocket URL for MT5 streaming data.
     mt5_login : str
         The MetaTrader 5 account login.
     mt5_password : str
@@ -116,7 +110,6 @@ class Mt5InstrumentProviderConfig(BaseMt5Config):
         mt5_host: str = "127.0.0.1",
         mt5_port: int = 8080,
         mt5_base_url: Optional[str] = None,
-        mt5_ws_url: Optional[str] = None,
         mt5_login: Optional[str] = None,
         mt5_password: Optional[str] = None,
         mt5_server: Optional[str] = None,
@@ -136,7 +129,6 @@ class Mt5InstrumentProviderConfig(BaseMt5Config):
             mt5_host=mt5_host,
             mt5_port=mt5_port,
             mt5_base_url=mt5_base_url,
-            mt5_ws_url=mt5_ws_url,
             mt5_login=mt5_login,
             mt5_password=mt5_password,
             mt5_server=mt5_server,
@@ -162,8 +154,6 @@ class Mt5DataClientConfig(BaseMt5Config, LiveDataClientConfig):
         The MetaTrader 5 port for the REST API.
     mt5_base_url : str
         The full base URL for the MT5 API (overrides host/port).
-    mt5_ws_url : str
-        The WebSocket URL for MT5 streaming data.
     mt5_login : str
         The MetaTrader 5 account login.
     mt5_password : str
@@ -195,7 +185,6 @@ class Mt5DataClientConfig(BaseMt5Config, LiveDataClientConfig):
         mt5_host: str = "127.0.0.1",
         mt5_port: int = 8080,
         mt5_base_url: Optional[str] = None,
-        mt5_ws_url: Optional[str] = None,
         mt5_login: Optional[str] = None,
         mt5_password: Optional[str] = None,
         mt5_server: Optional[str] = None,
@@ -205,8 +194,8 @@ class Mt5DataClientConfig(BaseMt5Config, LiveDataClientConfig):
         max_subscriptions: int = 1000,
         connection_retry_attempts: int = 3,
         connection_retry_delay: int = 5,
-        heartbeat_interval: int = 30,
-        reconnection_enabled: bool = True,
+        heartbeat_interval: int = 30,  # This parameter is now unused since WebSocket is removed
+        reconnection_enabled: bool = True,  # This parameter is now unused since WebSocket is removed
         enable_logging: bool = True,
         **kwargs,
     ):
@@ -218,7 +207,6 @@ class Mt5DataClientConfig(BaseMt5Config, LiveDataClientConfig):
             mt5_host=mt5_host,
             mt5_port=mt5_port,
             mt5_base_url=mt5_base_url,
-            mt5_ws_url=mt5_ws_url,
             mt5_login=mt5_login,
             mt5_password=mt5_password,
             mt5_server=mt5_server,
@@ -248,8 +236,6 @@ class Mt5ExecClientConfig(BaseMt5Config, LiveExecClientConfig):
         The MetaTrader 5 port for the REST API.
     mt5_base_url : str
         The full base URL for the MT5 API (overrides host/port).
-    mt5_ws_url : str
-        The WebSocket URL for MT5 streaming data.
     mt5_login : str
         The MetaTrader 5 account login.
     mt5_password : str
@@ -283,7 +269,6 @@ class Mt5ExecClientConfig(BaseMt5Config, LiveExecClientConfig):
         mt5_host: str = "127.0.0.1",
         mt5_port: int = 8080,
         mt5_base_url: Optional[str] = None,
-        mt5_ws_url: Optional[str] = None,
         mt5_login: Optional[str] = None,
         mt5_password: Optional[str] = None,
         mt5_server: Optional[str] = None,
@@ -307,7 +292,6 @@ class Mt5ExecClientConfig(BaseMt5Config, LiveExecClientConfig):
             mt5_host=mt5_host,
             mt5_port=mt5_port,
             mt5_base_url=mt5_base_url,
-            mt5_ws_url=mt5_ws_url,
             mt5_login=mt5_login,
             mt5_password=mt5_password,
             mt5_server=mt5_server,

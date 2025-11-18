@@ -16,7 +16,7 @@
  //! Configuration structures for the MetaTrader 5 adapter.
  //!
  //! This module defines the configuration structures for the MT5 adapter.
- //! Mt5Config describes the HTTP/WS endpoints and timeouts of the MT5 bridge.
+ //! Mt5Config describes the HTTP endpoints and timeouts of the MT5 bridge.
  //! The credentials (login/password/server) are carried by `Mt5Credential` (common/credential.rs).
 
 use serde::{Deserialize, Serialize};
@@ -30,12 +30,8 @@ pub mod execution_client;
 pub struct Mt5Config {
     /// The base URL for the MT5 REST API.
     pub base_url: String,
-    /// The WebSocket URL for MT5 streaming.
-    pub ws_url: String,
     /// HTTP timeout in seconds.
     pub http_timeout: u64,
-    /// WebSocket timeout in seconds.
-    pub ws_timeout: u64,
     /// Optional proxy URL.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
@@ -45,29 +41,25 @@ impl Default for Mt5Config {
     fn default() -> Self {
         Self {
             base_url: "http://localhost:8000".to_string(),
-            ws_url: "ws://localhost:8000".to_string(),
             http_timeout: 30,
-            ws_timeout: 30,
             proxy: None,
         }
     }
 }
 
 impl Mt5Config {
-    /// Creates a new configuration with the specified base URLs.
+    /// Creates a new configuration with the specified base URL.
     ///
     /// # Arguments
     ///
     /// * `base_url` - The base URL for the MT5 REST API
-    /// * `ws_url` - The WebSocket URL for MT5 streaming
     ///
     /// # Returns
     ///
-    /// A new configuration instance with the specified URLs.
-    pub fn with_urls(base_url: String, ws_url: String) -> Self {
+    /// A new configuration instance with the specified URL.
+    pub fn with_urls(base_url: String) -> Self {
         let mut config = Self::default();
         config.base_url = base_url;
-        config.ws_url = ws_url;
         config
     }
 }

@@ -73,7 +73,6 @@ async def test_mt5_adapter():
     #     password="your_password",
     #     server="your_server",
     #     base_url="http://localhost:8000",
-    #     ws_url="ws://localhost:8000"
     # )
     
     # Create backtest engine

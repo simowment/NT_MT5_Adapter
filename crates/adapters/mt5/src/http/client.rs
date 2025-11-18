@@ -867,9 +867,7 @@ mod tests {
     fn create_test_client() -> Result<Mt5HttpClient, Mt5HttpError> {
         let config = Mt5Config {
             base_url: "http://localhost:8080".to_string(),
-            ws_url: "ws://localhost:8080".to_string(),
             http_timeout: 30,
-            ws_timeout: 30,
             proxy: None,
         };
         let cred = Mt5Credential {
@@ -894,9 +892,7 @@ mod tests {
     fn test_http_client_with_proxy() {
         let config = Mt5Config {
             base_url: "http://localhost:8080".to_string(),
-            ws_url: "ws://localhost:8080".to_string(),
             http_timeout: 30,
-            ws_timeout: 30,
             proxy: Some("http://proxy.example.com:8080".to_string()),
         };
         let cred = Mt5Credential {

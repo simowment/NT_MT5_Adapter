@@ -1,4 +1,4 @@
-# NT_MT5_Adapter
+# NT_MT5_Adapter (WIP)
 
 MetaTrader 5 Adapter for NautilusTrader
 
@@ -7,7 +7,7 @@ MetaTrader 5 Adapter for NautilusTrader
 This adapter is divided into two main parts:
 
 1. **Rust Part**: in `crates/adapters/mt5/`
-   - Handles HTTP and WebSocket communications with the MT5 bridge
+   - Handles HTTP communications with the MT5 bridge
    - Provides Python bindings via PyO3
    - Implements low-level functionality
 
@@ -39,7 +39,7 @@ cargo build --features python-bindings
 - Rust (version specified in `rust-toolchain.toml`)
 - Python 3.8+
 - maturin or pyo3 for Python bindings
-- A running MT5 bridge service (e.g., an HTTP/WS server that communicates with MT5)
+- A running MT5 bridge service (e.g., an HTTP server that communicates with MT5)
 
 ## Testing
 
@@ -49,14 +49,3 @@ To test the adapter:
 python Adapter_Backtest_Test.py
 ```
 
-## Troubleshooting
-
-If you encounter issues:
-
-1. Check that the MT5 bridge is running
-2. Check that the Rust-Python bindings are correctly compiled
-3. Check the configuration parameters (credentials, URLs)
-
-## Documentation
-
-Refer to `adapterdoc.txt` for detailed adapter development specifications.

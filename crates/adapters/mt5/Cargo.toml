@@ -30,7 +30,6 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
@@ -85,12 +84,3 @@ crate-type = ["rlib", "cdylib"]
 name = "mt5-http"
 path = "bin/http.rs"
 
-# Run with `cargo run -p nautilus-adapters-mt5 --bin mt5-ws-data`.
-[[bin]]
-name = "mt5-ws-data"
-path = "bin/ws_data.rs"
-
-# Run with `cargo run -p nautilus-adapters-mt5 --bin mt5-ws-exec`.
-[[bin]]
-name = "mt5-ws-exec"
-path = "bin/ws_exec.rs"
