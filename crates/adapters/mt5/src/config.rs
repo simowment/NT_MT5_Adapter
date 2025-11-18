@@ -18,6 +18,10 @@
  //! This module defines the configuration structures for the MT5 adapter.
  //! Mt5Config describes the HTTP endpoints and timeouts of the MT5 bridge.
  //! The credentials (login/password/server) are carried by `Mt5Credential` (common/credential.rs).
+//! Configuration structures for the MetaTrader 5 adapter.
+//!
+//! This module defines the configuration for the MT5 REST API adapter.
+//! The credentials (login/password/server) are carried by `Mt5Credential` (common/credential.rs).
 
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +32,7 @@ pub mod execution_client;
 /// Main configuration for the MT5 adapter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mt5Config {
-    /// The base URL for the MT5 REST API.
+    /// The base URL for the MT5 REST API (e.g., "http://localhost:5000").
     pub base_url: String,
     /// HTTP timeout in seconds.
     pub http_timeout: u64,
@@ -57,7 +61,7 @@ impl Mt5Config {
     /// # Returns
     ///
     /// A new configuration instance with the specified URL.
-    pub fn with_urls(base_url: String) -> Self {
+    pub fn with_base_url(base_url: String) -> Self {
         let mut config = Self::default();
         config.base_url = base_url;
         config
