@@ -21,7 +21,6 @@
 use crate::config::{Mt5Config, Mt5DataClientConfig};
 use crate::http::client::Mt5HttpClient;
 use crate::http::error::Mt5HttpError as HttpClientError;
-use crate::common::urls::Mt5Url;
 use crate::common::credential::Mt5Credential;
 use std::sync::Arc;
 use thiserror::Error;

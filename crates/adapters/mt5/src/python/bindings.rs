@@ -39,19 +39,7 @@ pub fn nautilus_adapters_mt5(_py: Python, m: &PyModule) -> PyResult<()> {
 
     // Add HTTP-related types
     m.add_class::<crate::http::client::Mt5HttpClient>()?;
-    m.add_class::<crate::http::models::Mt5AccountInfo>()?;
     m.add_class::<crate::http::models::Mt5Symbol>()?;
-    m.add_class::<crate::http::models::Mt5Rate>()?;
-    m.add_class::<crate::http::models::Mt5OrderRequest>()?;
-    m.add_class::<crate::http::models::Mt5OrderResponse>()?;
-    m.add_class::<crate::http::models::Mt5Position>()?;
-    m.add_class::<crate::http::models::Mt5Trade>()?;
-
-
-    // Add query parameter builders
-    m.add_class::<crate::http::query::AccountInfoParams>()?;
-    m.add_class::<crate::http::query::SymbolsInfoParams>()?;
-    m.add_class::<crate::http::query::RatesInfoParams>()?;
 
     // Add the main client classes
     m.add_class::<crate::data_client::Mt5DataClient>()?;

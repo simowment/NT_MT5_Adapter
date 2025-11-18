@@ -13,17 +13,17 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
- //! Configuration structures for the MetaTrader 5 adapter.
- //!
- //! This module defines the configuration structures for the MT5 adapter.
- //! Mt5Config describes the HTTP endpoints and timeouts of the MT5 bridge.
- //! The credentials (login/password/server) are carried by `Mt5Credential` (common/credential.rs).
 //! Configuration for MT5 Instrument Provider.
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "python-bindings")]
+use pyo3::prelude::*;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "python-bindings", pyclass)]
 pub struct Mt5InstrumentProviderConfig {
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub base_url: String,
     pub http_timeout: Option<u64>,
     pub credential: crate::common::credential::Mt5Credential,
@@ -32,14 +32,14 @@ pub struct Mt5InstrumentProviderConfig {
     pub filter_futures: bool,
     pub filter_cfds: bool,
     pub auto_discover_instruments: bool,
-    pub cache_expiry: u32, // Cache expiry in seconds
+    pub cache_expiry: u32,
     pub enable_logging: bool,
 }
 
 impl Default for Mt5InstrumentProviderConfig {
     fn default() -> Self {
         Self {
-            base_url: "http://localhost:8080".to_string(),
+            base_url: "http://localhost:5000".to_string(),
             http_timeout: Some(30),
             credential: crate::common::credential::Mt5Credential::builder()
                 .login("demo")

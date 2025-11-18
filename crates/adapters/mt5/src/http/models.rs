@@ -24,19 +24,33 @@
 
 use serde::{Deserialize, Serialize};
 
-/// MT5 Symbol information
+#[cfg(feature = "python-bindings")]
+use pyo3::prelude::*;
+
+/// MT5 Symbol information from REST API
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "python-bindings", pyclass)]
 pub struct Mt5Symbol {
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub symbol: String,
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub digits: u32,
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub point_size: f64,
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub volume_min: f64,
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub volume_max: f64,
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub volume_step: f64,
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub contract_size: f64,
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub margin_initial: Option<f64>,
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub margin_maintenance: Option<f64>,
     #[serde(rename = "type")]
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     pub symbol_type: String,
 }
 

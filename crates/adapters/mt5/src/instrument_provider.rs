@@ -13,11 +13,6 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
- //! Configuration structures for the MetaTrader 5 adapter.
- //!
- //! This module defines the configuration structures for the MT5 adapter.
- //! Mt5Config describes the HTTP endpoints and timeouts of the MT5 bridge.
- //! The credentials (login/password/server) are carried by `Mt5Credential` (common/credential.rs).
 //! MT5 Instrument Provider implementation.
 //! 
 //! This module implements the instrument provider for the MT5 adapter,
@@ -28,7 +23,6 @@ use crate::http::client::Mt5HttpClient;
 use crate::http::error::{Mt5HttpError};
 use crate::common::parse::InstrumentMetadata;
 use crate::common::credential::Mt5Credential;
-use crate::common::urls::Mt5Url;
 use crate::common::parse::InstrumentType;
 use std::sync::Arc;
 use thiserror::Error;
@@ -86,7 +80,7 @@ pub struct Mt5InstrumentProvider {
 
 impl Mt5InstrumentProvider {
     pub fn new(config: Mt5InstrumentProviderConfig) -> Result<Self, InstrumentProviderError> {
-        // Construire la config HTTP globale pour le client.
+        // Build the HTTP config for the client
         let base_url = config.base_url.clone();
         let http_config = Mt5Config {
             base_url: base_url.clone(),
@@ -216,8 +210,10 @@ impl Mt5InstrumentProvider {
         let mut instruments = Vec::new();
 
         for symbol in symbols {
-            // Here we simply map Mt5Symbol -> InstrumentMetadata (MVP).
-            // To be refined according to the actual bridge schema.
+            // Parse instrument type from symbol name
+            let instrument_type = crate::common::parse::parse_instrument_symbol(&symbol.symbol)
+                .unwrap_or_else(|_| InstrumentType::Cfd { symbol: symbol.symbol.clone() });
+            
             let metadata = InstrumentMetadata {
                 symbol: symbol.symbol.clone(),
                 digits: symbol.digits as u8,
@@ -226,10 +222,7 @@ impl Mt5InstrumentProvider {
                 volume_max: symbol.volume_max,
                 volume_step: symbol.volume_step,
                 contract_size: symbol.contract_size,
-                instrument_type: InstrumentType::CurrencyPair {
-                    base_currency: "BASE".to_string(),
-                    quote_currency: "QUOTE".to_string(),
-                },
+                instrument_type,
             };
             instruments.push(metadata);
         }

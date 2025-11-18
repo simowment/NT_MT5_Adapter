@@ -14,16 +14,14 @@
 // -------------------------------------------------------------------------------------------------
 
  //! Configuration structures for the MetaTrader 5 adapter.
- //!
- //! This module defines the configuration structures for the MT5 adapter.
- //! Mt5Config describes the HTTP endpoints and timeouts of the MT5 bridge.
- //! The credentials (login/password/server) are carried by `Mt5Credential` (common/credential.rs).
-//! Configuration structures for the MetaTrader 5 adapter.
 //!
 //! This module defines the configuration for the MT5 REST API adapter.
 //! The credentials (login/password/server) are carried by `Mt5Credential` (common/credential.rs).
 
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "python-bindings")]
+use pyo3::prelude::*;
 
 pub mod instrument_provider;
 pub mod data_client;
@@ -31,7 +29,9 @@ pub mod execution_client;
 
 /// Main configuration for the MT5 adapter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "python-bindings", pyclass)]
 pub struct Mt5Config {
+    #[cfg_attr(feature = "python-bindings", pyo3(get, set))]
     /// The base URL for the MT5 REST API (e.g., "http://localhost:5000").
     pub base_url: String,
     /// HTTP timeout in seconds.
@@ -44,7 +44,7 @@ pub struct Mt5Config {
 impl Default for Mt5Config {
     fn default() -> Self {
         Self {
-            base_url: "http://localhost:8000".to_string(),
+            base_url: "http://localhost:5000".to_string(),
             http_timeout: 30,
             proxy: None,
         }

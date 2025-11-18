@@ -13,9 +13,7 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
- //! Configuration structures for the MetaTrader 5 adapter.
- //!
- //! This module defines the configuration structures for the MT5 adapter.
- //! Mt5Config describes the HTTP endpoints and timeouts of the MT5 bridge.
- //! The credentials (login/password/server) are carried by `Mt5Credential` (common/credential.rs).
-// This module intentionally left minimal - all PyO3 bindings are in bindings.rs
+//! Python bindings module for the MetaTrader 5 adapter.
+//!
+//! This module intentionally left minimal - all PyO3 bindings are defined
+//! in the respective modules with the `#[pyclass]` and `#[pymethods]` attributes.
