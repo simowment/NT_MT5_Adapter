@@ -13,7 +13,7 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-//! URL management for MetaTrader 5 API endpoints.
+//! URL management for MetaTrader 5 REST API endpoints.
 
 use std::fmt;
 
@@ -31,46 +31,6 @@ impl Mt5Url {
 
     pub fn base_url(&self) -> &str {
         &self.base_url
-    }
-
-    pub fn login_url(&self) -> String {
-        format!("{}/api/login", self.base_url)
-    }
-
-    pub fn account_info_url(&self) -> String {
-        format!("{}/api/account", self.base_url)
-    }
-
-    pub fn symbols_url(&self) -> String {
-        format!("{}/api/symbols", self.base_url)
-    }
-
-    pub fn symbol_info_url(&self, symbol: &str) -> String {
-        format!("{}/api/symbols/{}", self.base_url, symbol)
-    }
-
-    pub fn rates_url(&self) -> String {
-        format!("{}/api/rates", self.base_url)
-    }
-
-    pub fn orders_url(&self) -> String {
-        format!("{}/api/orders", self.base_url)
-    }
-
-    pub fn orders_by_id_url(&self, order_id: u64) -> String {
-        format!("{}/api/orders/{}", self.base_url, order_id)
-    }
-
-    pub fn trades_url(&self) -> String {
-        format!("{}/api/trades", self.base_url)
-    }
-
-    pub fn positions_url(&self) -> String {
-        format!("{}/api/positions", self.base_url)
-    }
-
-    pub fn history_url(&self) -> String {
-        format!("{}/api/history", self.base_url)
     }
 }
 
