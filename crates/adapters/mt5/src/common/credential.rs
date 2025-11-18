@@ -17,6 +17,8 @@
 
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 
 #[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
@@ -81,14 +83,30 @@ impl Mt5SignedCredential {
         }
     }
 
-    /// Signs a request message according to the BitMEX authentication scheme.
+    /// Signs a request message according to the BitMEX authentication scheme using HMAC SHA256.
+    ///
+    /// # Arguments
+    ///
+    /// * `verb` - HTTP verb (GET, POST, etc.)
+    /// * `endpoint` - API endpoint path (e.g., /api/login)
+    /// * `expires` - Expiration timestamp (Unix timestamp)
+    /// * `data` - Request body data (JSON string or empty)
+    ///
+    /// # Returns
+    ///
+    /// Base64-encoded HMAC SHA256 signature
     #[must_use]
-    pub fn sign(&self, _verb: &str, _endpoint: &str, _expires: i64, _data: &str) -> String {
-        // This is a placeholder implementation
-        // In a real implementation, you would use HMAC SHA256 as shown in the BitMEX example
-        // For now, we'll just return an empty string to avoid compilation errors
-        // The actual implementation would require adding the required dependencies to Cargo.toml
-        String::new()
+    pub fn sign(&self, verb: &str, endpoint: &str, expires: i64, data: &str) -> String {
+        use base64::{Engine as _, engine::general_purpose};
+        
+        let message = format!("{}{}{}{}", verb, endpoint, expires, data);
+        
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(self.api_secret.as_bytes())
+            .expect("HMAC can take key of any size");
+        mac.update(message.as_bytes());
+        
+        general_purpose::STANDARD.encode(mac.finalize().into_bytes())
     }
 }
 
