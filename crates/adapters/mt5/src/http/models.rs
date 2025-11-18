@@ -24,6 +24,22 @@
 
 use serde::{Deserialize, Serialize};
 
+/// MT5 Symbol information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mt5Symbol {
+    pub symbol: String,
+    pub digits: u32,
+    pub point_size: f64,
+    pub volume_min: f64,
+    pub volume_max: f64,
+    pub volume_step: f64,
+    pub contract_size: f64,
+    pub margin_initial: Option<f64>,
+    pub margin_maintenance: Option<f64>,
+    #[serde(rename = "type")]
+    pub symbol_type: String,
+}
+
 /// Standard MT5 REST API response wrapper
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]

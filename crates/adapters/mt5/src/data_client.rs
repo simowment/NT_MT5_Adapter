@@ -63,22 +63,14 @@ pub struct Mt5DataClient {
 impl Mt5DataClient {
     /// Creates a new instance of the MT5 data client.
     pub fn new(config: Mt5DataClientConfig) -> Result<Self, DataClientError> {
+        let base_url = config.base_url.clone();
         let http_config = Mt5Config {
-            base_url: config.base_url.clone(),
+            base_url: base_url.clone(),
             http_timeout: config.http_timeout,
             proxy: None,
         };
 
-        let cred = Mt5Credential {
-            login: config.credential.login.clone(),
-            password: config.credential.password.clone(),
-            server: config.credential.server.clone(),
-            proxy: None,
-            token: None,
-        };
-
-        let url = Mt5Url::new(&http_config.base_url);
-        let http_client = Arc::new(Mt5HttpClient::new(http_config, cred, url).map_err(|e| DataClientError::ConnectionError(e.to_string()))?);
+        let http_client = Arc::new(Mt5HttpClient::new(http_config, base_url).map_err(|e| DataClientError::ConnectionError(e.to_string()))?);
 
         Ok(Self { config, http_client })
     }

@@ -87,22 +87,14 @@ pub struct Mt5InstrumentProvider {
 impl Mt5InstrumentProvider {
     pub fn new(config: Mt5InstrumentProviderConfig) -> Result<Self, InstrumentProviderError> {
         // Construire la config HTTP globale pour le client.
+        let base_url = config.base_url.clone();
         let http_config = Mt5Config {
-            base_url: config.base_url.clone(),
+            base_url: base_url.clone(),
             http_timeout: config.http_timeout.unwrap_or(30),
             proxy: None,
         };
 
-        let cred = Mt5Credential {
-            login: config.credential.login.clone(),
-            password: config.credential.password.clone(),
-            server: config.credential.server.clone(),
-            proxy: None,
-            token: None,
-        };
-
-        let url = Mt5Url::new(&http_config.base_url);
-        let http_client_result = Mt5HttpClient::new(http_config, cred, url);
+        let http_client_result = Mt5HttpClient::new(http_config, base_url);
         let http_client = match http_client_result {
             Ok(client) => client,
             Err(e) => return Err(InstrumentProviderError::ConnectionError(e.to_string())),
@@ -123,13 +115,13 @@ impl Mt5InstrumentProvider {
     ///
     /// # Returns
     /// A `Result` containing a `Vec` of loaded instruments or an `InstrumentProviderError`
-    pub async fn load_all_async(&self, filters: Option<Vec<InstrumentFilter>>) -> Result<Vec<Instrument>, InstrumentProviderError> {
-        let instruments = self.discover_instruments().await?;
+    pub async fn load_all_async(&self, _filters: Option<Vec<InstrumentFilter>>) -> Result<Vec<InstrumentMetadata>, InstrumentProviderError> {
+        let instruments = self.discover_instruments_metadata().await?;
         
         // Apply filters if provided
-        let filtered_instruments = if let Some(filters) = filters {
+        let filtered_instruments = if let Some(filters) = _filters {
             instruments.into_iter()
-                .filter(|instrument| self.matches_filters(instrument, &filters))
+                .filter(|instrument| self.matches_filters_metadata(instrument, &filters))
                 .collect()
         } else {
             instruments
@@ -146,17 +138,17 @@ impl Mt5InstrumentProvider {
     ///
     /// # Returns
     /// A `Result` containing a `Vec` of loaded instruments or an `InstrumentProviderError`
-    pub async fn load_ids_async(&self, instrument_ids: Vec<InstrumentId>, filters: Option<Vec<InstrumentFilter>>) -> Result<Vec<Instrument>, InstrumentProviderError> {
-        let all_instruments = self.discover_instruments().await?;
+    pub async fn load_ids_async(&self, _instrument_ids: Vec<String>, _filters: Option<Vec<InstrumentFilter>>) -> Result<Vec<InstrumentMetadata>, InstrumentProviderError> {
+        let all_instruments = self.discover_instruments_metadata().await?;
         
         // Filter by instrument IDs
-        let mut filtered_instruments: Vec<Instrument> = all_instruments.into_iter()
-            .filter(|instrument| instrument_ids.contains(instrument.instrument_id()))
+        let mut filtered_instruments: Vec<InstrumentMetadata> = all_instruments.into_iter()
+            .filter(|instrument| _instrument_ids.contains(&instrument.symbol))
             .collect();
         
         // Apply additional filters if provided
-        if let Some(filters) = filters {
-            filtered_instruments.retain(|instrument| self.matches_filters(instrument, &filters));
+        if let Some(filters) = _filters {
+            filtered_instruments.retain(|instrument| self.matches_filters_metadata(instrument, &filters));
         }
         
         Ok(filtered_instruments)
@@ -170,7 +162,7 @@ impl Mt5InstrumentProvider {
     ///
     /// # Returns
     /// A `Result` containing the loaded instrument or an `InstrumentProviderError`
-    pub async fn load_async(&self, instrument_id: InstrumentId, filters: Option<Vec<InstrumentFilter>>) -> Result<Instrument, InstrumentProviderError> {
+    pub async fn load_async(&self, instrument_id: String, filters: Option<Vec<InstrumentFilter>>) -> Result<InstrumentMetadata, InstrumentProviderError> {
         let instruments = self.load_ids_async(vec![instrument_id], filters).await?;
         
         instruments.into_iter()
@@ -186,16 +178,17 @@ impl Mt5InstrumentProvider {
     ///
     /// # Returns
     /// `true` if the instrument matches all filters, `false` otherwise
-    fn matches_filters(&self, instrument: &Instrument, filters: &[InstrumentFilter]) -> bool {
+    fn matches_filters_metadata(&self, instrument: &InstrumentMetadata, filters: &[InstrumentFilter]) -> bool {
         for filter in filters {
             match filter {
                 InstrumentFilter::Symbol(symbol) => {
-                    if instrument.instrument_id().symbol != *symbol {
+                    if instrument.symbol != *symbol {
                         return false;
                     }
                 },
                 InstrumentFilter::Venue(venue) => {
-                    if instrument.instrument_id().venue != *venue {
+                    // For MT5, we can consider all instruments as belonging to MT5 venue
+                    if "MT5" != *venue {
                         return false;
                     }
                 },
@@ -212,7 +205,7 @@ impl Mt5InstrumentProvider {
     ///
     /// # Returns
     /// A `Result` containing a `Vec` of discovered instruments or an `InstrumentProviderError`
-    async fn discover_instruments(&self) -> Result<Vec<Instrument>, InstrumentProviderError> {
+    async fn discover_instruments_metadata(&self) -> Result<Vec<InstrumentMetadata>, InstrumentProviderError> {
         // Get all symbols from MT5
         let body = serde_json::json!({});
         let response = self.http_client.symbols_get(&body).await
@@ -247,12 +240,7 @@ impl Mt5InstrumentProvider {
             *cache = instruments.clone();
         }
 
-        // Convert Vec<InstrumentMetadata> to Vec<Instrument>
-        let instruments_converted: Vec<Instrument> = instruments
-            .into_iter()
-            .map(|metadata| self.create_instrument(&metadata))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(instruments_converted)
+        Ok(instruments)
     }
 
     /// Loads all instruments (legacy method for backward compatibility).
@@ -260,29 +248,16 @@ impl Mt5InstrumentProvider {
     /// # Returns
     /// A `Result` containing a unit type or an `InstrumentProviderError`
     pub async fn load_instruments(&self) -> Result<(), InstrumentProviderError> {
-        let instruments = self.discover_instruments().await?;
+        let instruments = self.discover_instruments_metadata().await?;
         
         for instrument in instruments {
-            tracing::info!("Loaded instrument: {}", instrument.instrument_id());
+            tracing::info!("Loaded instrument: {}", instrument.symbol);
         }
         
         Ok(())
     }
 
-    pub fn create_instrument(&self, metadata: &InstrumentMetadata) -> Result<Instrument, InstrumentProviderError> {
-        let instrument_id = InstrumentId::from_str(&metadata.symbol)
-            .map_err(|e| InstrumentProviderError::ParseError(e.to_string()))?;
-        
-        let price = Price::new(0.0, metadata.digits); // Using 0.0 as placeholder price
-        
-        Ok(Instrument::new(
-            instrument_id,
-            price,
-            metadata.volume_min,
-            metadata.volume_max,
-            metadata.volume_step,
-        ))
-    }
+    // Remove the create_instrument method as it's not needed with the simplified approach
 }
 
 #[cfg(feature = "python-bindings")]
@@ -317,7 +292,7 @@ impl Mt5InstrumentProvider {
     /// # Returns
     /// A list of loaded instruments
     #[pyo3(name = "load_ids_async")]
-    pub fn load_ids_async_py(&self, instrument_ids: Vec<InstrumentId>, filters: Option<Vec<InstrumentFilter>>) -> PyResult<PyObject> {
+    pub fn load_ids_async_py(&self, instrument_ids: Vec<String>, filters: Option<Vec<InstrumentFilter>>) -> PyResult<PyObject> {
         use pyo3_async_runtimes::tokio::future_into_py;
         future_into_py(self.py().unwrap(), async move {
             self.load_ids_async(instrument_ids, filters).await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
@@ -325,15 +300,15 @@ impl Mt5InstrumentProvider {
     }
 
     /// Loads a single instrument by its ID asynchronously.
-    /// 
+    ///
     /// # Arguments
     /// * `instrument_id` - The ID of the instrument to load
     /// * `filters` - Optional filters to apply to the instrument
-    /// 
+    ///
     /// # Returns
     /// The loaded instrument
     #[pyo3(name = "load_async")]
-    pub fn load_async_py(&self, instrument_id: InstrumentId, filters: Option<Vec<InstrumentFilter>>) -> PyResult<PyObject> {
+    pub fn load_async_py(&self, instrument_id: String, filters: Option<Vec<InstrumentFilter>>) -> PyResult<PyObject> {
         use pyo3_async_runtimes::tokio::future_into_py;
         future_into_py(self.py().unwrap(), async move {
             self.load_async(instrument_id, filters).await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
@@ -341,19 +316,19 @@ impl Mt5InstrumentProvider {
     }
 
     /// Discovers all instruments from the MT5 server (legacy method).
-    /// 
+    ///
     /// # Returns
     /// A list of discovered instruments
     #[pyo3(name = "discover_instruments")]
     pub fn discover_instruments_py(&self) -> PyResult<PyObject> {
         use pyo3_async_runtimes::tokio::future_into_py;
         future_into_py(self.py().unwrap(), async move {
-            self.discover_instruments().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            self.discover_instruments_metadata().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
         })
     }
 
     /// Loads all instruments (legacy method for backward compatibility).
-    /// 
+    ///
     /// # Returns
     /// A unit type indicating successful loading
     #[pyo3(name = "load_instruments")]
@@ -362,81 +337,5 @@ impl Mt5InstrumentProvider {
         future_into_py(self.py().unwrap(), async move {
             self.load_instruments().await.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
         })
-    }
-}
-
-// Mock implementation for Price::new - this would need the actual Nautilus types
-#[derive(Debug, Clone, PartialEq)]
-pub struct Price {
-    pub value: f64,
-    pub precision: u8,
-}
-
-impl Price {
-    pub fn new(value: f64, precision: u8) -> Self {
-        Self { value, precision }
-    }
-}
-
-// Mock implementation for Instrument - this would use the actual Nautilus Instrument
-#[derive(Debug, Clone, PartialEq)]
-pub struct Instrument {
-    pub instrument_id: InstrumentId,
-    pub price: Price,
-    pub volume_min: f64,
-    pub volume_max: f64,
-    pub volume_step: f64,
-}
-
-impl Instrument {
-    pub fn new(
-        instrument_id: InstrumentId,
-        price: Price,
-        volume_min: f64,
-        volume_max: f64,
-        volume_step: f64,
-    ) -> Self {
-        Self {
-            instrument_id,
-            price,
-            volume_min,
-            volume_max,
-            volume_step,
-        }
-    }
-
-    pub fn instrument_id(&self) -> &InstrumentId {
-        &self.instrument_id
-    }
-}
-
-// Mock implementation for InstrumentId
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub struct InstrumentId {
-    pub symbol: String,
-    pub venue: String,
-}
-
-impl InstrumentId {
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        // Simple split for venue.symbol format
-        let parts: Vec<&str> = s.split('.').collect();
-        if parts.len() == 2 {
-            Ok(Self {
-                symbol: parts[0].to_string(),
-                venue: parts[1].to_string(),
-            })
-        } else {
-            Ok(Self {
-                symbol: s.to_string(),
-                venue: "MT5".to_string(),
-            })
-        }
-    }
-}
-
-impl std::fmt::Display for InstrumentId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}", self.symbol, self.venue)
     }
 }

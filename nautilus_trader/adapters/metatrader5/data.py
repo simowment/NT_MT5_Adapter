@@ -204,7 +204,7 @@ class Mt5DataClient(LiveMarketDataClient):
             if self._connected:
                 symbol = str(bar_type.instrument_id)
                 # Placeholder for bars subscription via HTTP polling or other mechanism
-                self._log.debug(f"Bars subscription initiated for {bar_type} via HTTP")
+                self._log.debug(f"Bars subscription initiated for {bar_type} {symbol} via HTTP")
             else:
                 self._log.warning("Not connected to MT5")
         except Exception as e:
@@ -240,7 +240,7 @@ class Mt5DataClient(LiveMarketDataClient):
             if self._connected:
                 symbol = str(bar_type.instrument_id)
                 # Placeholder for bars unsubscription via HTTP polling or other mechanism
-                self._log.debug(f"Bars unsubscription initiated for {bar_type} via HTTP")
+                self._log.debug(f"Bars unsubscription initiated for {bar_type} {symbol} via HTTP")
             else:
                 self._log.warning("Not connected to MT5")
         except Exception as e:
