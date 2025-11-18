@@ -1,62 +1,62 @@
 # NT_MT5_Adapter
 
-Adaptateur MetaTrader 5 pour NautilusTrader
+MetaTrader 5 Adapter for NautilusTrader
 
-## Structure de l'adaptateur
+## Adapter Structure
 
-Cet adaptateur est divisé en deux parties principales :
+This adapter is divided into two main parts:
 
-1. **Partie Rust** : dans `crates/adapters/mt5/`
-   - Gère les communications HTTP et WebSocket avec le pont MT5
-   - Fournit des liaisons Python via PyO3
-   - Implémente les fonctionnalités de bas niveau
+1. **Rust Part**: in `crates/adapters/mt5/`
+   - Handles HTTP and WebSocket communications with the MT5 bridge
+   - Provides Python bindings via PyO3
+   - Implements low-level functionality
 
-2. **Partie Python** : dans `nautilus_trader/adapters/metatrader5/`
-   - Intègre l'adaptateur dans le système NautilusTrader
-   - Fournit les clients de données et d'exécution
-   - Gère la configuration et les fournisseurs d'instruments
+2. **Python Part**: in `nautilus_trader/adapters/metatrader5/`
+   - Integrates the adapter into the NautilusTrader system
+   - Provides data and execution clients
+   - Manages configuration and instrument providers
 
 ## Compilation
 
-Pour compiler l'adaptateur avec les liaisons Python :
+To compile the adapter with Python bindings:
 
 ```bash
-# Compiler en mode développement
+# Compile in development mode
 maturin develop --features python-bindings
 
-# Ou compiler en mode release
+# Or compile in release mode
 maturin build --release --features python-bindings
 ```
 
-Ou avec Cargo directement :
+Or with Cargo directly:
 
 ```bash
 cargo build --features python-bindings
 ```
 
-## Configuration requise
+## Requirements
 
-- Rust (version spécifiée dans `rust-toolchain.toml`)
+- Rust (version specified in `rust-toolchain.toml`)
 - Python 3.8+
-- maturin ou pyo3 pour les liaisons Python
-- Un service de pont MT5 en cours d'exécution (par exemple, un serveur HTTP/WS qui communique avec MT5)
+- maturin or pyo3 for Python bindings
+- A running MT5 bridge service (e.g., an HTTP/WS server that communicates with MT5)
 
-## Tests
+## Testing
 
-Pour tester l'adaptateur :
+To test the adapter:
 
 ```bash
 python Adapter_Backtest_Test.py
 ```
 
-## Dépannage
+## Troubleshooting
 
-Si vous rencontrez des problèmes :
+If you encounter issues:
 
-1. Vérifiez que le pont MT5 est en cours d'exécution
-2. Vérifiez que les liaisons Rust-Python sont correctement compilées
-3. Vérifiez les paramètres de configuration (identifiants, URLs)
+1. Check that the MT5 bridge is running
+2. Check that the Rust-Python bindings are correctly compiled
+3. Check the configuration parameters (credentials, URLs)
 
 ## Documentation
 
-Référez-vous à `adapterdoc.txt` pour les spécifications détaillées de développement des adaptateurs.
+Refer to `adapterdoc.txt` for detailed adapter development specifications.

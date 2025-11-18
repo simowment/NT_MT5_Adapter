@@ -88,12 +88,12 @@ class Mt5ExecutionClient(LiveExecutionClient):
     def connect(self):
         self._log.info("Connecting to MT5...")
         try:
-            # Authentification HTTP
+            # HTTP authentication
             import asyncio
             loop = asyncio.get_event_loop()
             loop.run_until_complete(self._http_client.login())
             
-            # Connexion WebSocket
+            # WebSocket connection
             loop.run_until_complete(self._ws_client.connect())
             loop.run_until_complete(self._ws_client.authenticate())
             
