@@ -35,8 +35,6 @@ crates/adapters/your_adapter/
 │   │   ├── models.rs     # Structs for REST payloads
 │   │   ├── query.rs      # Request and query builders
 │   │   └── parse.rs      # Response parsing functions
-│   ├── websocket/        # WebSocket implementation
-│   │   ├── client.rs     # WebSocket client
 │   │   ├── messages.rs   # Structs for stream payloads
 │   │   └── parse.rs      # Message parsing functions
 │   ├── python/           # PyO3 Python bindings
