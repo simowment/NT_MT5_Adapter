@@ -26,20 +26,13 @@ thiserror = { workspace = true }
 pyo3 = { workspace = true, features = ["extension-module"], optional = true }
 pyo3-async-runtimes = { workspace = true, optional = true }
 reqwest = { workspace = true }
-base64 = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-tokio-tungstenite = { workspace = true }
-futures-util = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 dashmap = { workspace = true }
-futures = { workspace = true }
-axum = { workspace = true }
-sha2 = "0.10"
-hmac = "0.12"
 
 [dev-dependencies]
 nautilus-testkit = { workspace = true }
@@ -79,18 +72,3 @@ extension-module = [
 name = "nautilus_adapters_mt5"
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
-
-# Run with `cargo run -p nautilus-adapters-mt5 --bin mt5-http`.
-[[bin]]
-name = "mt5-http"
-path = "bin/http.rs"
-
-# Run with `cargo run -p nautilus-adapters-mt5 --bin mt5-ws-data`.
-[[bin]]
-name = "mt5-ws-data"
-path = "bin/ws_data.rs"
-
-# Run with `cargo run -p nautilus-adapters-mt5 --bin mt5-ws-exec`.
-[[bin]]
-name = "mt5-ws-exec"
-path = "bin/ws_exec.rs"
