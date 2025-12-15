@@ -14,8 +14,6 @@ The MT5 REST server should:
 - Use POST requests with JSON payloads
 - Return JSON responses in the format `{"result": ...}` or `{"error": "..."}`
 
-See `MT5_REST_API_Documentation.md` for the complete API specification.
-
 ---
 
 ## Adapter Structure
