@@ -20,6 +20,7 @@ The data client for the MetaTrader 5 integration.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import TYPE_CHECKING
 
 from nautilus_mt5_adapter.common import MT5_VENUE
@@ -196,7 +197,7 @@ class Mt5DataClient(LiveMarketDataClient):
         )
         # MT5 market book requires explicit add/release
         symbol = command.instrument_id.symbol.value
-        await self._client.market_book_add(symbol)
+        await self._client.market_book_add(json.dumps(symbol))
 
     async def _unsubscribe_order_book_snapshots(
         self, command: UnsubscribeOrderBook
@@ -206,7 +207,7 @@ class Mt5DataClient(LiveMarketDataClient):
             f"Unsubscribing from order book snapshots for {command.instrument_id}"
         )
         symbol = command.instrument_id.symbol.value
-        await self._client.market_book_release(symbol)
+        await self._client.market_book_release(json.dumps(symbol))
 
     async def _subscribe_quote_ticks(self, command: SubscribeQuoteTicks) -> None:
         """Subscribe to quote ticks via polling."""
@@ -298,10 +299,13 @@ class Mt5DataClient(LiveMarketDataClient):
         self._log.info(f"Requesting quote ticks for {instrument_id}")
         symbol = instrument_id.symbol.value
         # Request tick data from MT5
-        ticks = await self._client.copy_ticks_from(
-            symbol=symbol,
-            count=request.limit or 1000,
-        )
+        request_body = {
+            "symbol": symbol,
+            "count": request.limit or 1000,
+        }
+        response_json = await self._client.copy_ticks_from(json.dumps(request_body))
+        response = json.loads(response_json) if response_json else {}
+        ticks = response.get("result", []) if isinstance(response, dict) else response
         self._log.info(f"Received {len(ticks) if ticks else 0} ticks for {symbol}")
         # TODO: Convert MT5 ticks to QuoteTick and publish
 
@@ -311,10 +315,13 @@ class Mt5DataClient(LiveMarketDataClient):
         self._log.info(f"Requesting trade ticks for {instrument_id}")
         symbol = instrument_id.symbol.value
         # Request tick data from MT5
-        ticks = await self._client.copy_ticks_from(
-            symbol=symbol,
-            count=request.limit or 1000,
-        )
+        request_body = {
+            "symbol": symbol,
+            "count": request.limit or 1000,
+        }
+        response_json = await self._client.copy_ticks_from(json.dumps(request_body))
+        response = json.loads(response_json) if response_json else {}
+        ticks = response.get("result", []) if isinstance(response, dict) else response
         self._log.info(
             f"Received {len(ticks) if ticks else 0} trade ticks for {symbol}"
         )
@@ -326,10 +333,13 @@ class Mt5DataClient(LiveMarketDataClient):
         self._log.info(f"Requesting bars for {bar_type}")
         symbol = bar_type.instrument_id.symbol.value
         # Request OHLC data from MT5
-        rates = await self._client.copy_rates_from(
-            symbol=symbol,
-            count=request.limit or 1000,
-        )
+        request_body = {
+            "symbol": symbol,
+            "count": request.limit or 1000,
+        }
+        response_json = await self._client.copy_rates_from(json.dumps(request_body))
+        response = json.loads(response_json) if response_json else {}
+        rates = response.get("result", []) if isinstance(response, dict) else response
         self._log.info(f"Received {len(rates) if rates else 0} bars for {symbol}")
         # TODO: Convert MT5 rates to Bar and publish
 
@@ -365,7 +375,13 @@ class Mt5DataClient(LiveMarketDataClient):
         """Poll for quote updates for subscribed symbols."""
         for symbol in list(self._subscribed_quote_ticks):
             try:
-                tick = await self._client.symbol_info_tick(symbol)
+                response_json = await self._client.symbol_info_tick(
+                    json.dumps([symbol])
+                )
+                response = json.loads(response_json) if response_json else {}
+                tick = (
+                    response.get("result") if isinstance(response, dict) else response
+                )
                 if tick:
                     # TODO: Convert MT5 tick to QuoteTick and publish via _handle_data
                     pass

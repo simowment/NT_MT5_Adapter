@@ -19,6 +19,8 @@ The instrument provider for the MetaTrader 5 integration.
 
 from __future__ import annotations
 
+
+import json
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -86,13 +88,18 @@ class Mt5InstrumentProvider(InstrumentProvider):
         self._log.info("Loading all instruments from MT5...")
 
         # Get total symbol count first
-        total = await self._client.symbols_total()
+        response_json = await self._client.symbols_total()
+        response = json.loads(response_json) if response_json else {}
+        total = response.get("result", 0) if response else 0
         self._log.info(f"MT5 reports {total} available symbols")
 
         # Load symbols in batches
         batch_size = 50
         for start in range(0, total, batch_size):
-            symbols = await self._client.symbols_get(start=start, count=batch_size)
+            request = {"start": start, "count": batch_size}
+            response_json = await self._client.symbols_get(json.dumps(request))
+            response = json.loads(response_json) if response_json else {}
+            symbols = response.get("result", []) if response else []
             if symbols:
                 for symbol_data in symbols:
                     instrument = self._parse_instrument(symbol_data)
@@ -127,7 +134,14 @@ class Mt5InstrumentProvider(InstrumentProvider):
         self._log.info(f"Loading instrument {symbol}...")
 
         # Get specific symbol info from MT5
-        symbol_data = await self._client.symbol_info(symbol)
+        # API expects a list of symbols
+        response_json = await self._client.symbol_info(json.dumps([symbol]))
+        response = json.loads(response_json) if response_json else {}
+        symbol_data = response.get("result", {}) if response else {}
+
+        # Result might be a list containing the dict
+        if isinstance(symbol_data, list) and symbol_data:
+            symbol_data = symbol_data[0]
 
         if not symbol_data:
             raise ValueError(f"Symbol not found in MT5: {symbol}")

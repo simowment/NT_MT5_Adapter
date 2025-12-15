@@ -109,11 +109,7 @@ async def test_data_retrieval(client):
         # Get symbol info for EURUSD (API expects array format: ["EURUSD"])
         print("Fetching EURUSD symbol info...")
         symbol_info = await client.symbol_info(json.dumps(["EURUSD"]))
-        print(
-            f"✅ EURUSD info: {symbol_info[:200]}..."
-            if len(symbol_info) > 200
-            else f"✅ EURUSD info: {symbol_info}"
-        )
+        print(f"✅ EURUSD info parsed: {json.dumps(symbol_info, indent=2)}")
 
         # Get current tick (API expects array format: ["EURUSD"])
         print("Fetching EURUSD tick...")

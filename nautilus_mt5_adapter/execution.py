@@ -20,6 +20,7 @@ The execution client for the MetaTrader 5 integration.
 from __future__ import annotations
 
 import asyncio
+import json
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -119,9 +120,12 @@ class Mt5ExecutionClient(LiveExecutionClient):
             await self._client.initialize()
 
             # Get account info to set account ID
-            account_info = await self._client.account_info()
-            if account_info and "number" in account_info:
-                self._account_id = AccountId(f"MT5-{account_info['number']}")
+            response_json = await self._client.account_info()
+            response = json.loads(response_json) if response_json else {}
+            account_info = response.get("result", {}) if response else {}
+
+            if account_info and "login" in account_info:
+                self._account_id = AccountId(f"MT5-{account_info['login']}")
                 self._log.info(f"Connected to account: {self._account_id}")
 
             # Load instruments
@@ -175,7 +179,9 @@ class Mt5ExecutionClient(LiveExecutionClient):
             # TODO: Extract from order tags or linked orders
 
             # Submit via HTTP
-            result = await self._client.order_send(request)
+            response_json = await self._client.order_send(json.dumps(request))
+            response = json.loads(response_json) if response_json else {}
+            result = response.get("result", {}) if response else {}
 
             if result and result.get("retcode") == Mt5RetCode.DONE:
                 self._log.info(f"Order submitted successfully: {result}")
@@ -225,7 +231,9 @@ class Mt5ExecutionClient(LiveExecutionClient):
             if command.trigger_price:
                 request["stoplimit"] = float(command.trigger_price)
 
-            result = await self._client.order_send(request)
+            response_json = await self._client.order_send(json.dumps(request))
+            response = json.loads(response_json) if response_json else {}
+            result = response.get("result", {}) if response else {}
 
             if result and result.get("retcode") == Mt5RetCode.DONE:
                 self._log.info("Order modified successfully")
@@ -250,7 +258,9 @@ class Mt5ExecutionClient(LiveExecutionClient):
                 "order": int(command.venue_order_id.value),
             }
 
-            result = await self._client.order_send(request)
+            response_json = await self._client.order_send(json.dumps(request))
+            response = json.loads(response_json) if response_json else {}
+            result = response.get("result", {}) if response else {}
 
             if result and result.get("retcode") == Mt5RetCode.DONE:
                 self._log.info("Order canceled successfully")
@@ -270,7 +280,9 @@ class Mt5ExecutionClient(LiveExecutionClient):
         self._log.info(f"Canceling all orders for {command.instrument_id}")
         try:
             # Get all pending orders
-            orders = await self._client.orders_get()
+            response_json = await self._client.orders_get()
+            response = json.loads(response_json) if response_json else {}
+            orders = response.get("result", []) if response else []
             if not orders:
                 return
 
@@ -286,7 +298,7 @@ class Mt5ExecutionClient(LiveExecutionClient):
                     "action": Mt5TradeAction.REMOVE,
                     "order": order.get("ticket"),
                 }
-                await self._client.order_send(request)
+                await self._client.order_send(json.dumps(request))
 
             self._log.info(f"All orders canceled for {symbol or 'all symbols'}")
 
@@ -314,7 +326,9 @@ class Mt5ExecutionClient(LiveExecutionClient):
         reports = []
         try:
             # Get pending orders
-            orders = await self._client.orders_get()
+            response_json = await self._client.orders_get()
+            response = json.loads(response_json) if response_json else {}
+            orders = response.get("result", []) if response else []
             if orders:
                 for order in orders:
                     report = self._parse_order_status_report(order)
@@ -322,7 +336,13 @@ class Mt5ExecutionClient(LiveExecutionClient):
 
             # Get historical orders if not open_only
             if not open_only and start and end:
-                history = await self._client.history_orders_get(start, end)
+                # history_orders_get expects a dict body with start/end
+                request = {"from": start, "to": end}
+                response_json = await self._client.history_orders_get(
+                    json.dumps(request)
+                )
+                response = json.loads(response_json) if response_json else {}
+                history = response.get("result", []) if response else []
                 if history:
                     for order in history:
                         report = self._parse_order_status_report(order)
@@ -352,7 +372,11 @@ class Mt5ExecutionClient(LiveExecutionClient):
                 end = int(time.time())
                 start = end - 86400
 
-            deals = await self._client.history_deals_get(start, end)
+            # history_deals_get expects a dict body with start/end
+            request = {"from": start, "to": end}
+            response_json = await self._client.history_deals_get(json.dumps(request))
+            response = json.loads(response_json) if response_json else {}
+            deals = response.get("result", []) if response else []
             if deals:
                 for deal in deals:
                     report = self._parse_fill_report(deal)
@@ -374,7 +398,9 @@ class Mt5ExecutionClient(LiveExecutionClient):
         self._log.info("Generating position status reports")
         reports = []
         try:
-            positions = await self._client.positions_get()
+            response_json = await self._client.positions_get()
+            response = json.loads(response_json) if response_json else {}
+            positions = response.get("result", []) if response else []
             if positions:
                 for position in positions:
                     report = self._parse_position_status_report(position)
