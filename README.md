@@ -1,112 +1,117 @@
-# NT_MT5_Adapter
+# NautilusTrader MT5 Adapter
 
-MetaTrader 5 Adapter for NautilusTrader
+A high-performance **MetaTrader 5 (MT5)** adapter for **NautilusTrader**.
 
-## ⚠️ MT5 REST Server Required
-
-**This adapter requires a running MT5 REST API server** to communicate with MetaTrader 5. Since MT5 doesn't natively support REST APIs, you must use a middleware server that exposes MT5 functionality via HTTP.
-
-This one is made to work with this adapter: https://github.com/simowment/MT5_REST_Server.git
-
-The MT5 REST server should:
-- Run on `http://localhost:5000` (default, configurable)
-- Expose endpoints like `/api/account_info`, `/api/symbol_info`, `/api/order_send`, etc.
-- Use POST requests with JSON payloads
-- Return JSON responses in the format `{"result": ...}` or `{"error": "..."}`
+This adapter connects NautilusTrader to MT5 via a lightweight **Open Source REST Middleware** (Python-based), enabling both **Live Trading** and **Data Acquisition**.
 
 ---
 
-## Adapter Structure
+## ⚠️ Prerequisites & Middleware
 
-This adapter is divided into two main parts:
+**This adapter requires the MT5 REST Server middleware.**
+MetaTrader 5 does not support REST/WebSockets natively. You must run the middleware server alongside your MT5 terminal (on the same machine).
 
-1. **Rust Part**: `crates/adapters/mt5/`
-   - HTTP client for communicating with MT5 REST server
-   - Python bindings via PyO3
-   - Low-level data models and parsing
+**Middleware Repository:**  
+👉 [MT5_REST_Server (GitHub)](https://github.com/simowment/MT5_REST_Server)
 
-2. **Python Part**: `nautilus_mt5_adapter`
-   - NautilusTrader integration (Data/Execution clients)
-   - Factory classes for TradingNode
-   - Instrument providers and configuration
-
----
-
-## Quick Start
-
-
-### 1. Compile the Rust Bindings
-
-```bash
-# Development mode
-maturin develop --features python-bindings
-
-# Or release mode
-maturin build --release --features python-bindings
-```
-
-### 2. Start the MT5 REST Server
-
-Ensure your MT5 REST middleware server is running (`http://localhost:5000` by default).
-
-### 3. Verify Installation
-
-```bash
-python -c "import nautilus_mt5; print(nautilus_mt5.__version__)"
-```
-
-### 3. Run Tests
-
-```bash
-# Basic connectivity test
-python testbindings.py
-
-# Order placement test (requires AutoTrading enabled in MT5)
-python test_live_strategy.py
-
-# Historical data fetch for backtesting
-python Adapter_Backtest_Test.py
-```
+### Setup Steps
+1.  **Install MT5** and log in to your broker account.
+2.  Enable **"Allow automated trading"** in MT5 (Tools -> Options -> Expert Advisors).
+3.  **Clone & Run the Middleware**: `python server.py` (Default: `http://localhost:5000`).
+4.  **Important**: In MT5 -> Tools -> Options -> Charts, set **"Max bars in chart"** to **Unlimited** to allow downloading large history.
 
 ---
 
-## Usage with NautilusTrader
+## ⚡ Features
+
+### 1. Robust Data Fetching
+*   **Automatic Pagination**: Request unlimited historical data. The adapter automatically chunks requests (e.g., 30 days for M1 bars, 6 hours for Ticks) to bypass HTTP and API limits.
+*   **Gap Handling**: Gracefully handles market closures and missing data.
+*   **Correct Instrument Mapping**: Automatically detects **Forex** vs **CFDs** (Indices, Crypto, Stocks) based on instrument path.
+
+### 2. Live Order Execution
+*   **Netting Mode**: Designed for Netting accounts (standard for algo trading).
+*   **Advanced Order Tags**: Support for Stop Loss and Take Profit via Nautilus tags.
+    ```python
+    # Example: Send Market Buy with SL/TP
+    order = self.order_factory.market(
+        instrument_id,
+        quantity,
+        tags={"sl": 1.0500, "tp": 1.0800} 
+    )
+    self.submit_order(order)
+    ```
+
+---
+
+## 🛠️ Installation & Building
+
+This adapter uses **Rust** for performance handling of JSON and HTTP.
+
+1.  **Install dependencies**:
+    ```bash
+    pip install maturin nautilus_trader
+    ```
+
+2.  **Build and Install**:
+    ```bash
+    maturin develop --features python-bindings
+    ```
+
+---
+
+## 🧪 Testing
+
+We provide a comprehensive test suite to verify connectivity and logic.
+
+### 1. Basic Connection Test
+Verifies that the adapter can talk to the MT5 Middleware.
+```bash
+python tests/test_bindings.py
+```
+
+### 2. Backtest Data Test (Pagination Check)
+Fetches a large range of historical data (e.g., 30 days of M1 bars) to verify pagination logic.
+```bash
+python tests/test_backtest.py
+```
+
+### 3. Live Trading Test
+Places a real order (Demo recommended!) to verify execution logic.
+```bash
+python tests/test_live_strategy.py
+```
+
+---
+
+## 📝 Configuration
+
+Configure the adapter in your NautilusTrader script:
 
 ```python
-from nautilus_trader.adapters.metatrader5 import (
-    MT5_VENUE,
-    Mt5DataClientConfig,
-    Mt5ExecClientConfig,
-    Mt5LiveDataClientFactory,
-    Mt5LiveExecClientFactory,
+from nautilus_mt5 import Mt5DataClientConfig, Mt5ExecClientConfig, Mt5InstrumentProviderConfig
+
+# Adapter Config
+provider_config = Mt5InstrumentProviderConfig(
+    base_url="http://localhost:5000",
+    filter_cfds=True,                # Include Indices/Crypto
+    filter_currencies=("EUR", "USD") # Optional filter
 )
 
-# Add factories to the trading node
-node.add_data_client_factory("MT5", Mt5LiveDataClientFactory)
-node.add_exec_client_factory("MT5", Mt5LiveExecClientFactory)
+data_config = Mt5DataClientConfig(
+    base_url="http://localhost:5000",
+    instrument_provider=provider_config
+)
 
-# Configure clients
-config = TradingNodeConfig(
-    data_clients={
-        "MT5": Mt5DataClientConfig(
-            mt5_base_url="http://localhost:5000",
-        ),
-    },
-    exec_clients={
-        "MT5": Mt5ExecClientConfig(
-            mt5_base_url="http://localhost:5000",
-        ),
-    },
+exec_config = Mt5ExecClientConfig(
+    base_url="http://localhost:5000",
+    instrument_provider=provider_config,
+    max_concurrent_orders=50
 )
 ```
 
----
+## 🔍 Known Limitations
 
-## Requirements
-
-- **MT5 REST Server** - A middleware server exposing MT5 via HTTP (required)
-- **Rust** - Version specified in `rust-toolchain.toml`
-- **Python** - 3.8+
-- **maturin** - For building Python bindings
-
----
+1.  **Speed**: Fetching millions of M1 bars takes time (HTTP overhead). Use local caching for backtests after the first download.
+2.  **Ticks**: Tick data is heavy. Requesting large tick ranges will be slow; use M1 bars where possible.
+3.  **Account Type**: Currently optimized for **Netting** accounts. Hedging accounts may cause position tracking desyncs.

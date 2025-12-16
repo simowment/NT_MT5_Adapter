@@ -24,14 +24,14 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from nautilus_mt5_adapter.config import (
+from nautilus_mt5.config import (
     Mt5DataClientConfig,
     Mt5ExecClientConfig,
     Mt5InstrumentProviderConfig,
 )
-from nautilus_mt5_adapter.data import Mt5DataClient
-from nautilus_mt5_adapter.execution import Mt5ExecutionClient
-from nautilus_mt5_adapter.providers import Mt5InstrumentProvider
+from nautilus_mt5.data import Mt5DataClient
+from nautilus_mt5.execution import Mt5ExecutionClient
+from nautilus_mt5.providers import Mt5InstrumentProvider
 from nautilus_trader.cache.cache import Cache
 from nautilus_trader.common.component import LiveClock
 from nautilus_trader.common.component import MessageBus
@@ -70,7 +70,7 @@ def get_mt5_http_client(
 
     """
     try:
-        from nautilus_mt5_adapter.bindings import (
+        from nautilus_mt5.bindings import (
             Mt5Config,
             Mt5HttpClient,
         )

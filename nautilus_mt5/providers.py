@@ -19,17 +19,17 @@ The instrument provider for the MetaTrader 5 integration.
 
 from __future__ import annotations
 
-
 import json
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from nautilus_mt5_adapter.common import MT5_VENUE
-from nautilus_mt5_adapter.config import Mt5InstrumentProviderConfig
+from nautilus_mt5.common import MT5_VENUE
+from nautilus_mt5.config import Mt5InstrumentProviderConfig
 from nautilus_trader.common.providers import InstrumentProvider
 from nautilus_trader.core.correctness import PyCondition
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.identifiers import Symbol
+from nautilus_trader.model.instruments import Cfd
 from nautilus_trader.model.instruments import CurrencyPair
 from nautilus_trader.model.objects import Currency
 from nautilus_trader.model.objects import Price
@@ -56,6 +56,9 @@ class Mt5InstrumentProvider(InstrumentProvider):
         The configuration for the provider.
 
     """
+
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls)
 
     def __init__(
         self,
@@ -146,6 +149,9 @@ class Mt5InstrumentProvider(InstrumentProvider):
         if not symbol_data:
             raise ValueError(f"Symbol not found in MT5: {symbol}")
 
+        if not isinstance(symbol_data, dict):
+            raise TypeError(f"Expected dict for symbol data, got {type(symbol_data)}")
+
         instrument = self._parse_instrument(symbol_data)
         self.add(instrument)
         self._log.info(f"Loaded instrument: {instrument_id}")
@@ -218,27 +224,61 @@ class Mt5InstrumentProvider(InstrumentProvider):
             venue=MT5_VENUE,
         )
 
-        return CurrencyPair(
-            instrument_id=instrument_id,
-            raw_symbol=Symbol(symbol_name),
-            base_currency=base_currency,
-            quote_currency=quote_currency,
-            price_precision=digits,
-            size_precision=size_precision,
-            price_increment=Price.from_str(str(point)),
-            size_increment=Quantity.from_str(str(volume_step)),
-            lot_size=Quantity.from_str(str(volume_step)),
-            max_quantity=Quantity.from_str(str(volume_max)),
-            min_quantity=Quantity.from_str(str(volume_min)),
-            max_notional=None,
-            min_notional=None,
-            max_price=None,
-            min_price=None,
-            margin_init=Decimal(str(symbol_data.get("margin_initial", 0))),
-            margin_maint=Decimal(str(symbol_data.get("margin_maintenance", 0))),
-            maker_fee=Decimal("0"),  # MT5 doesn't expose fees directly
-            taker_fee=Decimal("0"),
-            ts_event=ts_now,
-            ts_init=ts_now,
-            info=symbol_data,  # Store full MT5 data for reference
-        )
+        # Determine instrument type based on path or category
+        path = symbol_data.get("path", "").lower()
+        category = symbol_data.get("category", "").lower()
+
+        is_forex = "forex" in path or "fx" in category
+
+        if is_forex:
+            return CurrencyPair(
+                instrument_id=instrument_id,
+                raw_symbol=Symbol(symbol_name),
+                base_currency=base_currency,
+                quote_currency=quote_currency,
+                price_precision=digits,
+                size_precision=size_precision,
+                price_increment=Price.from_str(str(point)),
+                size_increment=Quantity.from_str(str(volume_step)),
+                lot_size=Quantity.from_str(str(volume_step)),
+                max_quantity=Quantity.from_str(str(volume_max)),
+                min_quantity=Quantity.from_str(str(volume_min)),
+                max_notional=None,
+                min_notional=None,
+                max_price=None,
+                min_price=None,
+                margin_init=Decimal(str(symbol_data.get("margin_initial", 0))),
+                margin_maint=Decimal(str(symbol_data.get("margin_maintenance", 0))),
+                maker_fee=Decimal("0"),
+                taker_fee=Decimal("0"),
+                ts_event=ts_now,
+                ts_init=ts_now,
+                info=symbol_data,
+            )
+        else:
+            # Default to CFD for everything else (Indices, Crypto, Stocks)
+            # as most MT5 brokers are CFD based.
+            return Cfd(
+                instrument_id=instrument_id,
+                raw_symbol=Symbol(symbol_name),
+                base_currency=base_currency,
+                quote_currency=quote_currency,
+                price_precision=digits,
+                size_precision=size_precision,
+                price_increment=Price.from_str(str(point)),
+                size_increment=Quantity.from_str(str(volume_step)),
+                lot_size=Quantity.from_str(str(volume_step)),
+                max_quantity=Quantity.from_str(str(volume_max)),
+                min_quantity=Quantity.from_str(str(volume_min)),
+                max_notional=None,
+                min_notional=None,
+                max_price=None,
+                min_price=None,
+                margin_init=Decimal(str(symbol_data.get("margin_initial", 0))),
+                margin_maint=Decimal(str(symbol_data.get("margin_maintenance", 0))),
+                maker_fee=Decimal("0"),
+                taker_fee=Decimal("0"),
+                ts_event=ts_now,
+                ts_init=ts_now,
+                info=symbol_data,
+            )

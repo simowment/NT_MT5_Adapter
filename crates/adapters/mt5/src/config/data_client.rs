@@ -61,3 +61,17 @@ impl Mt5DataClientConfig {
         config
     }
 }
+
+#[cfg(feature = "python-bindings")]
+#[pymethods]
+impl Mt5DataClientConfig {
+    #[new]
+    #[pyo3(signature = (mt5_base_url="http://localhost:5000".to_string(), http_timeout=30, enable_logging=true))]
+    fn new(mt5_base_url: String, http_timeout: u64, enable_logging: bool) -> Self {
+        let mut config = Self::default();
+        config.base_url = mt5_base_url;
+        config.http_timeout = http_timeout;
+        config.enable_logging = enable_logging;
+        config
+    }
+}

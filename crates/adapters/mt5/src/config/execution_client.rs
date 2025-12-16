@@ -67,3 +67,18 @@ impl Mt5ExecutionClientConfig {
         config
     }
 }
+
+#[cfg(feature = "python-bindings")]
+#[pymethods]
+impl Mt5ExecutionClientConfig {
+    #[new]
+    #[pyo3(signature = (mt5_base_url="http://localhost:5000".to_string(), http_timeout=30, enable_logging=true, simulate_orders=true))]
+    fn new(mt5_base_url: String, http_timeout: u64, enable_logging: bool, simulate_orders: bool) -> Self {
+        let mut config = Self::default();
+        config.base_url = mt5_base_url;
+        config.http_timeout = http_timeout;
+        config.enable_logging = enable_logging;
+        config.simulate_orders = simulate_orders;
+        config
+    }
+}

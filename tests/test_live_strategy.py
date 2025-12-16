@@ -1,143 +1,191 @@
 #!/usr/bin/env python3
 """
-MT5 Adapter Live Strategy Test
+MT5 Live Trading Test
 
-Tests the Rust HTTP client with order placement functionality.
-This tests the adapter's ability to send orders to MT5.
-
-WARNING: This will place REAL trades if connected to a real account!
-         Use a demo account for testing.
-
-Usage:
-    1. Start your MT5 middleware server
-    2. Run: python test_live_strategy.py
+Simple strategy that sends a market buy order every few seconds to test the adapter.
 """
 
-import asyncio
-import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from decimal import Decimal
+
+from nautilus_trader.common.enums import LogColor
+from nautilus_trader.config import LiveDataEngineConfig
+from nautilus_trader.config import LiveExecEngineConfig
+from nautilus_trader.config import LoggingConfig
+from nautilus_trader.config import StrategyConfig
+from nautilus_trader.config import TradingNodeConfig
+from nautilus_trader.live.node import TradingNode
+from nautilus_trader.model.enums import OrderSide
+from nautilus_trader.model.enums import TimeInForce
+from nautilus_trader.model.identifiers import InstrumentId
+from nautilus_trader.model.identifiers import TraderId
+from nautilus_trader.model.objects import Quantity
+from nautilus_trader.trading.strategy import Strategy
+
+from nautilus_mt5.config import (
+    Mt5DataClientConfig,
+    Mt5ExecClientConfig,
+    Mt5InstrumentProviderConfig,
+)
+from nautilus_mt5.factories import Mt5LiveDataClientFactory, Mt5LiveExecClientFactory
 
 
-async def test_order_placement(base_url: str):
-    """Test order placement through the Rust HTTP client."""
-    print("=" * 60)
-    print("MT5 Order Placement Test")
-    print("=" * 60)
-    print("\n⚠️  WARNING: This will place REAL trades!")
-    print("    Make sure you're using a DEMO account!\n")
+BASE_URL = "http://localhost:5000"
 
-    from nautilus_mt5 import Mt5HttpClient, Mt5Config
 
-    # Create client
-    config = Mt5Config()
-    client = Mt5HttpClient(config, base_url)
+class BuyEverySecondConfig(StrategyConfig, frozen=True):
+    """Config for the test strategy."""
 
-    # Step 1: Get account info
-    print("\n📊 Step 1: Getting account info...")
-    account_json = await client.account_info()
-    account = json.loads(account_json)
-    if "result" in account:
-        acc = account["result"]
-        print(f"   Balance: ${acc.get('balance', 'N/A')}")
-        print(f"   Equity: ${acc.get('equity', 'N/A')}")
-        print(f"   Leverage: 1:{acc.get('leverage', 'N/A')}")
-    else:
-        print(f"   Error: {account}")
-        return
+    instrument_id: str
+    order_interval_secs: float = 5.0  # Order every 5 seconds
+    trade_size: Decimal = Decimal("0.01")  # Minimum lot size
+    max_orders: int = 3  # Stop after 3 orders
 
-    # Step 2: Get EURUSD tick
-    print("\n📈 Step 2: Getting EURUSD current price...")
-    tick_json = await client.symbol_info_tick(json.dumps(["EURUSD"]))
-    tick = json.loads(tick_json)
-    if "result" in tick:
-        t = tick["result"]
-        print(f"   Bid: {t.get('bid', 'N/A')}")
-        print(f"   Ask: {t.get('ask', 'N/A')}")
-        current_price = t.get("ask", 0)
-    else:
-        print(f"   Error: {tick}")
-        return
 
-    # Step 3: Check current positions
-    print("\n📋 Step 3: Checking current positions...")
-    positions_json = await client.positions_get()
-    positions = json.loads(positions_json)
-    if "result" in positions:
-        pos_list = positions["result"]
-        print(f"   Open positions: {len(pos_list)}")
-        for p in pos_list[:3]:  # Show first 3
-            print(
-                f"   - {p.get('symbol', 'N/A')}: {p.get('volume', 'N/A')} lots @ {p.get('price_open', 'N/A')}"
-            )
+class BuyEverySecondStrategy(Strategy):
+    """
+    Simple test strategy that sends a market buy every N seconds.
+    """
 
-    # Step 4: Place a test order
-    print("\n🛒 Step 4: Placing test BUY order...")
-    print("   Symbol: EURUSD")
-    print("   Volume: 0.01 lots")
-    print("   Type: Market BUY")
+    def __init__(self, config: BuyEverySecondConfig) -> None:
+        super().__init__(config)
+        self.instrument_id = InstrumentId.from_str(config.instrument_id)
+        self.order_interval_secs = config.order_interval_secs
+        self.trade_size = config.trade_size
+        self.max_orders = config.max_orders
+        self.orders_sent = 0
 
-    # MT5 order_send request format
-    order_request = {
-        "symbol": "EURUSD",
-        "volume": 0.01,
-        "type": 0,  # ORDER_TYPE_BUY = 0
-        "action": 1,  # TRADE_ACTION_DEAL = 1
-        "price": current_price,
-        "deviation": 20,
-        "magic": 123456,
-        "comment": "Nautilus MT5 Test",
-        "type_filling": 0,  # ORDER_FILLING_FOK = 0
-        "type_time": 0,  # ORDER_TIME_GTC = 0
-    }
+    def on_start(self) -> None:
+        self.log.info(
+            "Strategy starting - will send buy orders periodically",
+            color=LogColor.GREEN,
+        )
 
-    confirm = input("\n   ⚠️  Place order? (yes/no): ")
-    if confirm.lower() != "yes":
-        print("   Order cancelled by user.")
-        return
+        # Request instrument to be loaded
+        self.request_instrument(self.instrument_id)
+
+        # Subscribe to quote ticks to get price updates
+        self.subscribe_quote_ticks(self.instrument_id)
+
+        # Schedule first order with delay to allow instrument loading
+        from datetime import timedelta
+
+        self.clock.set_timer(
+            name="order_timer",
+            interval=timedelta(seconds=self.order_interval_secs),
+            callback=self._on_timer,
+        )
+
+    def on_quote_tick(self, tick) -> None:
+        self.log.info(
+            f"Quote: {tick.instrument_id} bid={tick.bid_price} ask={tick.ask_price}"
+        )
+
+    def _on_timer(self, event) -> None:
+        if self.orders_sent >= self.max_orders:
+            self.log.warning(f"Max orders ({self.max_orders}) reached, stopping timer")
+            self.clock.cancel_timer("order_timer")
+            return
+
+        self.log.info(f"Timer fired - sending buy order #{self.orders_sent + 1}")
+        self._send_buy_order()
+
+    def _send_buy_order(self) -> None:
+        instrument = self.cache.instrument(self.instrument_id)
+        if not instrument:
+            self.log.error(f"Instrument {self.instrument_id} not in cache")
+            return
+
+        order = self.order_factory.market(
+            instrument_id=self.instrument_id,
+            order_side=OrderSide.BUY,
+            quantity=Quantity(float(self.trade_size), instrument.size_precision),
+            time_in_force=TimeInForce.IOC,  # Immediate or cancel
+        )
+
+        self.submit_order(order)
+        self.orders_sent += 1
+        self.log.info(f"Submitted order: {order}", color=LogColor.BLUE)
+
+    def on_order_accepted(self, event) -> None:
+        self.log.info(f"Order ACCEPTED: {event}", color=LogColor.GREEN)
+
+    def on_order_rejected(self, event) -> None:
+        self.log.error(f"Order REJECTED: {event}")
+
+    def on_order_filled(self, event) -> None:
+        self.log.info(f"Order FILLED: {event}", color=LogColor.GREEN)
+
+    def on_stop(self) -> None:
+        self.log.info(f"Strategy stopped. Total orders sent: {self.orders_sent}")
+
+
+def main():
+    # Instrument provider config
+    provider_config = Mt5InstrumentProviderConfig(
+        base_url=BASE_URL,
+    )
+
+    # Data client config
+    data_config = Mt5DataClientConfig(
+        base_url=BASE_URL,
+        instrument_provider=provider_config,
+        poll_interval_ms=500,  # 500ms polling
+    )
+
+    # Execution client config
+    exec_config = Mt5ExecClientConfig(
+        base_url=BASE_URL,
+        instrument_provider=provider_config,
+    )
+
+    # Trading node config
+    node_config = TradingNodeConfig(
+        trader_id=TraderId("TESTER-001"),
+        logging=LoggingConfig(log_level="INFO"),
+        data_engine=LiveDataEngineConfig(
+            time_bars_timestamp_on_close=True,
+        ),
+        exec_engine=LiveExecEngineConfig(),
+        data_clients={"MT5": data_config},
+        exec_clients={"MT5": exec_config},
+        timeout_connection=30.0,
+        timeout_reconciliation=10.0,
+        timeout_portfolio=10.0,
+        timeout_disconnection=10.0,
+    )
+
+    # Build node
+    node = TradingNode(config=node_config)
+
+    # Register factories
+    node.add_data_client_factory("MT5", Mt5LiveDataClientFactory)
+    node.add_exec_client_factory("MT5", Mt5LiveExecClientFactory)
+
+    # Strategy config
+    strategy_config = BuyEverySecondConfig(
+        instrument_id="EURUSD.MT5",
+        order_interval_secs=5.0,
+        trade_size=Decimal("0.01"),
+        max_orders=3,
+    )
+    strategy = BuyEverySecondStrategy(config=strategy_config)
+    node.trader.add_strategy(strategy)
+
+    # Build and run
+    node.build()
 
     try:
-        result_json = await client.order_send(json.dumps(order_request))
-        result = json.loads(result_json)
-        print(f"\n   Order result: {json.dumps(result, indent=2)}")
-
-        if "result" in result:
-            r = result["result"]
-            if r.get("retcode") == 10009:  # TRADE_RETCODE_DONE
-                print("\n   ✅ Order placed successfully!")
-                print(f"   Order ID: {r.get('order', 'N/A')}")
-                print(f"   Deal ID: {r.get('deal', 'N/A')}")
-                print(f"   Volume: {r.get('volume', 'N/A')}")
-                print(f"   Price: {r.get('price', 'N/A')}")
-            else:
-                print(f"\n   ❌ Order failed: {r.get('comment', 'Unknown error')}")
-                print(f"   Return code: {r.get('retcode', 'N/A')}")
-        else:
-            print(f"\n   ❌ Error: {result}")
-
-    except Exception as e:
-        print(f"\n   ❌ Order failed: {e}")
-
-    # Step 5: Check positions again
-    print("\n📋 Step 5: Checking positions after order...")
-    await asyncio.sleep(1)  # Wait for order to process
-    positions_json = await client.positions_get()
-    positions = json.loads(positions_json)
-    if "result" in positions:
-        pos_list = positions["result"]
-        print(f"   Open positions: {len(pos_list)}")
-        for p in pos_list[:5]:
-            print(
-                f"   - {p.get('symbol', 'N/A')}: {p.get('volume', 'N/A')} lots @ {p.get('price_open', 'N/A')}"
-            )
-
-    print("\n" + "=" * 60)
-    print("✅ Test complete!")
-    print("=" * 60)
-
-
-def main(base_url: str):
-    asyncio.run(test_order_placement(base_url))
+        node.run()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    finally:
+        node.dispose()
 
 
 if __name__ == "__main__":
-    base_url = "http://localhost:5000"
-    main(base_url)
+    main()

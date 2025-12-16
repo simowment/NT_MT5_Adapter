@@ -74,3 +74,16 @@ impl Default for Mt5InstrumentProviderConfig {
         }
     }
 }
+
+#[cfg(feature = "python-bindings")]
+#[pymethods]
+impl Mt5InstrumentProviderConfig {
+    #[new]
+    #[pyo3(signature = (base_url="http://localhost:5000".to_string(), auto_discover=true))]
+    fn new(base_url: String, auto_discover: bool) -> Self {
+        let mut config = Self::default();
+        config.base_url = base_url;
+        config.auto_discover_instruments = auto_discover;
+        config
+    }
+}

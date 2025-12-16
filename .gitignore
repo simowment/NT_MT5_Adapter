@@ -213,12 +213,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Ignore everything in nautilus_trader except the metatrader5 folder
-nautilus_trader/*
-!nautilus_trader/adapters/
-!nautilus_trader/adapters/metatrader5/
-!nautilus_trader/adapters/metatrader5/**
-
 llmdocs.txt
 
 pyrightconfig.json

@@ -20,4 +20,9 @@ Common constants and utilities for the MetaTrader 5 integration.
 from nautilus_trader.model.identifiers import Venue
 
 
+# Venue identifier for MT5
 MT5_VENUE = Venue("MT5")
+
+# String constant for use as client key in TradingNodeConfig dictionaries
+# Usage: data_clients={MT5: Mt5DataClientConfig(...)}
+MT5 = "MT5"

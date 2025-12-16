@@ -24,8 +24,8 @@ import json
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from nautilus_mt5_adapter.common import MT5_VENUE
-from nautilus_mt5_adapter.constants import (
+from nautilus_mt5.common import MT5_VENUE
+from nautilus_mt5.constants import (
     Mt5OrderState,
     Mt5OrderType,
     Mt5RetCode,
@@ -64,8 +64,8 @@ from nautilus_trader.model.objects import Price
 from nautilus_trader.model.objects import Quantity
 
 if TYPE_CHECKING:
-    from nautilus_mt5_adapter.config import Mt5ExecClientConfig
-    from nautilus_mt5_adapter.providers import Mt5InstrumentProvider
+    from nautilus_mt5.config import Mt5ExecClientConfig
+    from nautilus_mt5.providers import Mt5InstrumentProvider
     from nautilus_trader.cache.cache import Cache
     from nautilus_trader.common.component import LiveClock
     from nautilus_trader.common.component import MessageBus
@@ -108,7 +108,6 @@ class Mt5ExecutionClient(LiveExecutionClient):
         self._client = client
         self._instrument_provider = instrument_provider
         self._config = config
-        self._account_id: AccountId | None = None
 
     # -- CONNECTION HANDLERS ----------------------------------------------------------------------
 
@@ -124,9 +123,43 @@ class Mt5ExecutionClient(LiveExecutionClient):
             response = json.loads(response_json) if response_json else {}
             account_info = response.get("result", {}) if response else {}
 
-            if account_info and "login" in account_info:
-                self._account_id = AccountId(f"MT5-{account_info['login']}")
-                self._log.info(f"Connected to account: {self._account_id}")
+            if not account_info:
+                raise RuntimeError("Failed to get account info from MT5")
+
+            # MT5 returns 'login' or 'number' for account ID
+            account_number = account_info.get("login") or account_info.get("number")
+            if not account_number:
+                raise RuntimeError("Account info missing login/number field")
+
+            # Set account ID - must match format "ClientId-AccountNumber"
+            account_id = AccountId(f"MT5-{account_number}")
+            self._set_account_id(account_id)
+            self._log.info(f"Connected to account: {self.account_id}")
+
+            # Get account currency and balance
+            account_currency_str = account_info.get("currency", "USD")
+            account_currency = Currency.from_str(account_currency_str)
+            self._base_currency = account_currency
+
+            # Generate initial account state to register with cache
+            from nautilus_trader.model.objects import AccountBalance
+
+            balance = float(account_info.get("balance", 0))
+            margin_free = float(account_info.get("margin_free", balance))
+            margin_used = float(account_info.get("margin", 0))
+
+            account_balance = AccountBalance(
+                total=Money(Decimal(str(balance)), account_currency),
+                locked=Money(Decimal(str(margin_used)), account_currency),
+                free=Money(Decimal(str(margin_free)), account_currency),
+            )
+
+            self.generate_account_state(
+                balances=[account_balance],
+                margins=[],
+                reported=True,
+                ts_event=self._clock.timestamp_ns(),
+            )
 
             # Load instruments
             await self._instrument_provider.initialize()
@@ -154,9 +187,7 @@ class Mt5ExecutionClient(LiveExecutionClient):
             volume = float(order.quantity)
 
             # Determine MT5 order type (0=Buy, 1=Sell, 2=BuyLimit, etc.)
-            mt5_order_type = self._convert_order_type(
-                order.order_side, order.order_type
-            )
+            mt5_order_type = self._convert_order_type(order.side, order.order_type)
 
             # Build order request matching MT5 REST API format
             request = {
@@ -175,8 +206,26 @@ class Mt5ExecutionClient(LiveExecutionClient):
                 if order.trigger_price:
                     request["stoplimit"] = float(order.trigger_price)
 
-            # Add SL/TP if configured
-            # TODO: Extract from order tags or linked orders
+            # Add SL/TP if configured via tags (Nautilus standard pattern for ad-hoc fields)
+            tags = order.tags
+            if tags:
+                if "sl" in tags:
+                    request["sl"] = float(tags["sl"])
+                elif "SL" in tags:
+                    request["sl"] = float(tags["SL"])
+
+                if "tp" in tags:
+                    request["tp"] = float(tags["tp"])
+                elif "TP" in tags:
+                    request["tp"] = float(tags["TP"])
+
+            # Notify system that order is being submitted
+            self.generate_order_submitted(
+                strategy_id=order.strategy_id,
+                instrument_id=order.instrument_id,
+                client_order_id=order.client_order_id,
+                ts_event=self._clock.timestamp_ns(),
+            )
 
             # Submit via HTTP
             response_json = await self._client.order_send(json.dumps(request))
@@ -187,6 +236,10 @@ class Mt5ExecutionClient(LiveExecutionClient):
                 self._log.info(f"Order submitted successfully: {result}")
                 # Generate accepted event
                 self._generate_order_accepted(order, result)
+
+                # For market orders (DEAL action), order is filled immediately
+                if order.order_type == OrderType.MARKET:
+                    self._generate_order_filled(order, result)
             else:
                 error_msg = (
                     result.get("comment", "Unknown error") if result else "No response"
@@ -336,10 +389,10 @@ class Mt5ExecutionClient(LiveExecutionClient):
 
             # Get historical orders if not open_only
             if not open_only and start and end:
-                # history_orders_get expects a dict body with start/end
-                request = {"from": start, "to": end}
+                # history_orders_get expects [start_time, end_time] array
+                params = [start, end]
                 response_json = await self._client.history_orders_get(
-                    json.dumps(request)
+                    json.dumps(params)
                 )
                 response = json.loads(response_json) if response_json else {}
                 history = response.get("result", []) if response else []
@@ -372,9 +425,9 @@ class Mt5ExecutionClient(LiveExecutionClient):
                 end = int(time.time())
                 start = end - 86400
 
-            # history_deals_get expects a dict body with start/end
-            request = {"from": start, "to": end}
-            response_json = await self._client.history_deals_get(json.dumps(request))
+            # history_deals_get expects [start_time, end_time] array
+            params = [start, end]
+            response_json = await self._client.history_deals_get(json.dumps(params))
             response = json.loads(response_json) if response_json else {}
             deals = response.get("result", []) if response else []
             if deals:
@@ -547,20 +600,104 @@ class Mt5ExecutionClient(LiveExecutionClient):
 
     def _generate_order_accepted(self, order, result: dict) -> None:
         """Generate order accepted event."""
-        # TODO: Emit OrderAccepted event via msgbus
-        pass
+        venue_order_id = VenueOrderId(
+            str(result.get("order", result.get("deal", order.client_order_id)))
+        )
+        ts_event = self._clock.timestamp_ns()
+
+        self.generate_order_accepted(
+            strategy_id=order.strategy_id,
+            instrument_id=order.instrument_id,
+            client_order_id=order.client_order_id,
+            venue_order_id=venue_order_id,
+            ts_event=ts_event,
+        )
 
     def _generate_order_rejected(self, order, reason: str) -> None:
         """Generate order rejected event."""
-        # TODO: Emit OrderRejected event via msgbus
-        pass
+        ts_event = self._clock.timestamp_ns()
+
+        self.generate_order_rejected(
+            strategy_id=order.strategy_id,
+            instrument_id=order.instrument_id,
+            client_order_id=order.client_order_id,
+            reason=reason,
+            ts_event=ts_event,
+        )
 
     def _generate_order_updated(self, command: ModifyOrder, result: dict) -> None:
         """Generate order updated event."""
-        # TODO: Emit OrderUpdated event via msgbus
-        pass
+        order = self._cache.order(command.client_order_id)
+        if not order:
+            self._log.warning(f"Order not found in cache: {command.client_order_id}")
+            return
+
+        ts_event = self._clock.timestamp_ns()
+
+        self.generate_order_updated(
+            strategy_id=order.strategy_id,
+            instrument_id=order.instrument_id,
+            client_order_id=command.client_order_id,
+            venue_order_id=command.venue_order_id,
+            quantity=command.quantity or order.quantity,
+            price=command.price,
+            trigger_price=command.trigger_price,
+            ts_event=ts_event,
+        )
 
     def _generate_order_canceled(self, command: CancelOrder) -> None:
         """Generate order canceled event."""
-        # TODO: Emit OrderCanceled event via msgbus
-        pass
+        order = self._cache.order(command.client_order_id)
+        if not order:
+            self._log.warning(f"Order not found in cache: {command.client_order_id}")
+            return
+
+        ts_event = self._clock.timestamp_ns()
+
+        self.generate_order_canceled(
+            strategy_id=order.strategy_id,
+            instrument_id=order.instrument_id,
+            client_order_id=command.client_order_id,
+            venue_order_id=command.venue_order_id,
+            ts_event=ts_event,
+        )
+
+    def _generate_order_filled(self, order, result: dict) -> None:
+        """Generate order filled event for market orders."""
+        ts_event = self._clock.timestamp_ns()
+
+        # Extract fill details from MT5 result
+        deal_id = result.get("deal", result.get("order", 0))
+        venue_order_id = VenueOrderId(str(result.get("order", deal_id)))
+        trade_id = TradeId(str(deal_id))
+
+        # Get fill price and volume from result
+        fill_price = result.get("price", result.get("ask", result.get("bid", 0)))
+        fill_volume = result.get("volume", float(order.quantity))
+
+        # Get instrument for currency info
+        instrument = self._cache.instrument(order.instrument_id)
+        quote_currency = (
+            instrument.quote_currency if instrument else Currency.from_str("USD")
+        )
+
+        # Commission comes from deal info (may be 0 for market orders without explicit fee)
+        commission_value = Decimal(str(result.get("commission", 0)))
+        commission = Money(commission_value, quote_currency)
+
+        self.generate_order_filled(
+            strategy_id=order.strategy_id,
+            instrument_id=order.instrument_id,
+            client_order_id=order.client_order_id,
+            venue_order_id=venue_order_id,
+            venue_position_id=None,  # MT5 handles position netting internally
+            trade_id=trade_id,
+            order_side=order.side,
+            order_type=order.order_type,
+            last_qty=Quantity.from_str(str(fill_volume)),
+            last_px=Price.from_str(str(fill_price)),
+            quote_currency=quote_currency,
+            commission=commission,
+            liquidity_side=LiquiditySide.TAKER,  # Market orders are always takers
+            ts_event=ts_event,
+        )
