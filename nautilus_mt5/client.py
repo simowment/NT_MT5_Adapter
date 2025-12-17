@@ -23,11 +23,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from datetime import timedelta
 from typing import Any
 
+from nautilus_trader.model.data import Bar, BarType
+from nautilus_trader.model.instruments import Instrument
+from nautilus_trader.model.objects import Price, Quantity
+
 from .bindings import Mt5Config, Mt5HttpClient
+from .constants import Mt5Timeframe
 
 
 class Mt5Client:
@@ -63,6 +68,150 @@ class Mt5Client:
         """Shutdown connection to MT5 terminal."""
         res = await self._client.shutdown()
         return self._parse_bool(res)
+
+    async def request_bars(
+        self,
+        bar_type: BarType,
+        instrument: Instrument,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        count: int | None = None,
+    ) -> list[Bar]:
+        """
+        Request historical bars from MT5 as Nautilus Bar objects.
+
+        This follows the NautilusTrader adapter pattern where the HTTP client
+        returns domain objects directly instead of raw dictionaries.
+
+        Parameters
+        ----------
+        bar_type : BarType
+            The bar type specification including instrument, timeframe, and aggregation.
+        instrument : Instrument
+            The instrument for precision information (price_precision, size_precision).
+        start : datetime, optional
+            Start time for fetching bars.
+        end : datetime, optional
+            End time for fetching bars.
+        count : int, optional
+            Number of bars to fetch (used if start/end not specified).
+
+        Returns
+        -------
+        list[Bar]
+            List of Nautilus Bar objects.
+        """
+        symbol = bar_type.instrument_id.symbol.value
+
+        # Map BarType timeframe to MT5 timeframe value
+        tf_seconds = self._bar_type_to_seconds(bar_type)
+        tf_val = self._seconds_to_mt5_timeframe(tf_seconds)
+
+        bars: list[Bar] = []
+
+        if start and end:
+            # RANGE REQUEST (Paginated)
+            start_ts = int(start.timestamp())
+            end_ts = int(end.timestamp())
+            current_start = start_ts
+            chunk_size = int(timedelta(days=30).total_seconds())
+
+            while current_start < end_ts:
+                current_end = min(current_start + chunk_size, end_ts)
+                params = [symbol, tf_val, current_start, current_end]
+                response_json = await self._client.copy_rates_range(json.dumps(params))
+                chunk_data = self._parse_response(response_json)
+
+                if isinstance(chunk_data, list):
+                    for row in chunk_data:
+                        if isinstance(row, list) and len(row) >= 6:
+                            bar = self._row_to_bar(
+                                row, bar_type, instrument, tf_seconds
+                            )
+                            bars.append(bar)
+
+                current_start = current_end
+                await asyncio.sleep(0.01)
+
+        else:
+            # COUNT REQUEST (Default)
+            ts = int(datetime.now(timezone.utc).timestamp())
+            request_count = count if count is not None else 1000
+            params = [symbol, tf_val, ts, request_count]
+            response_json = await self._client.copy_rates_from(json.dumps(params))
+            data = self._parse_response(response_json)
+
+            if isinstance(data, list):
+                for row in data:
+                    if isinstance(row, list) and len(row) >= 6:
+                        bar = self._row_to_bar(row, bar_type, instrument, tf_seconds)
+                        bars.append(bar)
+
+        return bars
+
+    def _row_to_bar(
+        self, row: list, bar_type: BarType, instrument: Instrument, tf_seconds: int
+    ) -> Bar:
+        """Convert a raw MT5 rate row to a Nautilus Bar."""
+        ts_open = int(row[0])
+        ts_close = ts_open + tf_seconds
+        ts_ns = ts_close * 1_000_000_000
+
+        return Bar(
+            bar_type=bar_type,
+            open=Price(float(row[1]), instrument.price_precision),
+            high=Price(float(row[2]), instrument.price_precision),
+            low=Price(float(row[3]), instrument.price_precision),
+            close=Price(float(row[4]), instrument.price_precision),
+            volume=Quantity(float(row[5]), instrument.size_precision),
+            ts_event=ts_ns,
+            ts_init=ts_ns,
+        )
+
+    def _bar_type_to_seconds(self, bar_type: BarType) -> int:
+        """Extract timeframe in seconds from BarType."""
+        spec = bar_type.spec
+        step = spec.step
+
+        # BarAggregation enum values
+        from nautilus_trader.model.enums import BarAggregation
+
+        if spec.aggregation == BarAggregation.SECOND:
+            return step
+        elif spec.aggregation == BarAggregation.MINUTE:
+            return step * 60
+        elif spec.aggregation == BarAggregation.HOUR:
+            return step * 3600
+        elif spec.aggregation == BarAggregation.DAY:
+            return step * 86400
+        else:
+            return 60  # Default to 1 minute
+
+    def _seconds_to_mt5_timeframe(self, seconds: int) -> int:
+        """Convert seconds to MT5 timeframe value."""
+        mapping = {
+            60: Mt5Timeframe.M1,
+            120: Mt5Timeframe.M2,
+            180: Mt5Timeframe.M3,
+            240: Mt5Timeframe.M4,
+            300: Mt5Timeframe.M5,
+            360: Mt5Timeframe.M6,
+            600: Mt5Timeframe.M10,
+            720: Mt5Timeframe.M12,
+            900: Mt5Timeframe.M15,
+            1200: Mt5Timeframe.M20,
+            1800: Mt5Timeframe.M30,
+            3600: Mt5Timeframe.H1,
+            7200: Mt5Timeframe.H2,
+            10800: Mt5Timeframe.H3,
+            14400: Mt5Timeframe.H4,
+            21600: Mt5Timeframe.H6,
+            28800: Mt5Timeframe.H8,
+            43200: Mt5Timeframe.H12,
+            86400: Mt5Timeframe.D1,
+            604800: Mt5Timeframe.W1,
+        }
+        return mapping.get(seconds, Mt5Timeframe.M1)
 
     async def fetch_bars(
         self,

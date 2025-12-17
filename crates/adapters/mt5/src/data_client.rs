@@ -42,6 +42,16 @@ impl From<String> for DataClientError {
 
 #[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
+#[cfg(feature = "python-bindings")]
+use nautilus_core::nanos::UnixNanos;
+#[cfg(feature = "python-bindings")]
+use nautilus_model::{
+    data::{Bar, BarType},
+    enums::BarAggregation,
+    types::{Price, Quantity},
+};
+#[cfg(feature = "python-bindings")]
+use chrono::{DateTime, Utc};
 
 #[cfg(feature = "python-bindings")]
 #[derive(Clone, Debug)]
@@ -153,6 +163,112 @@ impl Mt5DataClient {
             Ok(Mt5BarList(bars_raw))
         })
     }
+
+    /// Requests historical bars and returns Nautilus Bar objects (Paginated).
+    #[pyo3(name = "request_bars")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn py_request_bars<'py>(
+        &self,
+        py: Python<'py>,
+        bar_type: BarType,
+        instrument: Bound<'py, PyAny>,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
+        count: Option<u32>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.clone();
+        
+        // Extract symbol and precisions
+        let symbol = bar_type.instrument_id().symbol().as_str().to_string();
+        let price_precision: u8 = instrument.getattr("price_precision")?.extract()?;
+        let size_precision: u8 = instrument.getattr("size_precision")?.extract()?;
+        let bar_type_clone = bar_type.clone();
+
+        // Calculate timeframe in seconds for bar close calculation
+        let tf_seconds = match bar_type.spec().aggregation() {
+            BarAggregation::Second => bar_type.spec().step(),
+            BarAggregation::Minute => bar_type.spec().step() * 60,
+            BarAggregation::Hour => bar_type.spec().step() * 3600,
+            BarAggregation::Day => bar_type.spec().step() * 86400,
+            _ => 60, // Default to 1 minute
+        };
+
+        // Determine MT5 timeframe value
+        let mt5_tf = match tf_seconds {
+            60 => 1,
+            300 => 5,
+            900 => 15,
+            1800 => 30,
+            3600 => 16385, // H1
+            14400 => 16388, // H4
+            86400 => 16408, // D1
+            _ => 1, // Fallback M1
+        };
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut bars: Vec<Bar> = Vec::new();
+            
+            // Logic:
+            // 1. If start and end provided -> Range Request (Loop)
+            // 2. Else -> Count Request from now
+            
+            if let (Some(start_dt), Some(end_dt)) = (start, end) {
+                let mut current_start = start_dt.timestamp();
+                let end_ts = end_dt.timestamp();
+                let chunk_size = 30 * 24 * 3600; // 30 days chunk
+                
+                while current_start < end_ts {
+                    let current_end = std::cmp::min(current_start + chunk_size, end_ts);
+                     // [symbol, timeframe, start, end]
+                    let body = serde_json::json!([symbol, mt5_tf, current_start, current_end]);
+                    
+                    match client.http_client.copy_rates_range(&body).await {
+                        Ok(val) => {
+                             if let Some(res) = val.get("result") {
+                                 if let Ok(rows) = serde_json::from_value::<Vec<Vec<serde_json::Value>>>(res.clone()) {
+                                    for row in rows {
+                                        if let Some(bar) = parse_bar_row(&row, &bar_type_clone, tf_seconds, price_precision, size_precision) {
+                                            bars.push(bar);
+                                        }
+                                    }
+                                 }
+                             }
+                        },
+                        Err(e) => tracing::error!("Error fetching bars chunk: {}", e),
+                    }
+                    
+                    current_start = current_end;
+                    // Yield to avoid blocking executor too long (optional)
+                    tokio::task::yield_now().await; 
+                }
+            } else {
+                // Count request
+                let count_val = count.unwrap_or(1000);
+                let now = Utc::now().timestamp();
+                // [symbol, timeframe, start, count]
+                let body = serde_json::json!([symbol, mt5_tf, now, count_val]);
+                
+                 let result = client.http_client.copy_rates_from(&body).await
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+                
+                 if let Some(res) = result.get("result") {
+                     let rows: Vec<Vec<serde_json::Value>> = serde_json::from_value(res.clone())
+                        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+                     
+                     for row in rows {
+                        if let Some(bar) = parse_bar_row(&row, &bar_type_clone, tf_seconds, price_precision, size_precision) {
+                            bars.push(bar);
+                        }
+                     }
+                 }
+            }
+
+            Python::attach(|py| {
+                let py_bars: PyResult<Vec<_>> = bars.into_iter().map(|bar| bar.into_py_any(py)).collect();
+                Ok(py_bars?)
+            })
+        })
+    }
 }
 
 // Helper struct to handle conversion to Python List[Dict]
@@ -179,4 +295,51 @@ impl<'py> IntoPyObject<'py> for Mt5BarList {
         }
         Ok(list)
     }
+}
+
+/// Parses a raw MT5 bar row into a Nautilus `Bar` object.
+///
+/// # Arguments
+///
+/// * `row` - Raw JSON array [time, open, high, low, close, tick_vol, spread, real_vol]
+/// * `bar_type` - The bar type specification
+/// * `tf_seconds` - Timeframe in seconds for calculating bar close time
+/// * `price_prec` - Price precision from instrument
+/// * `size_prec` - Size precision from instrument
+///
+/// # Returns
+///
+/// Returns `Some(Bar)` on success, `None` if parsing fails.
+#[cfg(feature = "python-bindings")]
+fn parse_bar_row(
+    row: &[serde_json::Value],
+    bar_type: &BarType,
+    tf_seconds: u64,
+    price_prec: u8,
+    size_prec: u8,
+) -> Option<Bar> {
+    if row.len() < 6 {
+        return None;
+    }
+
+    let time_sec = row[0].as_i64()?;
+    let open = row[1].as_f64()?;
+    let high = row[2].as_f64()?;
+    let low = row[3].as_f64()?;
+    let close = row[4].as_f64()?;
+    let tick_vol = row[5].as_f64()?;
+
+    let ts_open = time_sec as u64;
+    let ts_init_ns = UnixNanos::from((ts_open + tf_seconds) * 1_000_000_000);
+
+    Some(Bar::new(
+        bar_type.clone(),
+        Price::from_f64(open, price_prec).ok()?,
+        Price::from_f64(high, price_prec).ok()?,
+        Price::from_f64(low, price_prec).ok()?,
+        Price::from_f64(close, price_prec).ok()?,
+        Quantity::from_f64(tick_vol, size_prec).ok()?,
+        ts_init_ns,
+        ts_init_ns,
+    ))
 }

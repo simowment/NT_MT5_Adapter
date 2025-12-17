@@ -122,10 +122,14 @@ nautilus_mt5/
    - Uses `_handle_data()` for streaming individual ticks
 
 ### Added
-1. **Order event generation** - Full order lifecycle event emission
-2. **Account state initialization** - Generates initial `AccountState` on connect
-3. **Mt5Client** (`client.py`) - High-level client for scripting
-4. **test_live.py** - Live trading test with simple strategy
+1.  **Rust Core (`data_client.rs`)** - Implemented `py_request_bars` returning native `Vec<Bar>`, fully implementing the Nautilus adapter pattern in Rust handling.
+2.  **Mt5Client (`client.py`)** - Added `request_bars` method (currently Python-native) to standardize the API surface.
+3.  **Tests (`test_backtest.py`)** - Refactored to use `request_bars`, removing manual dict-to-Bar conversion.
+4.  **test_live.py** - Live trading test with simple strategy.
+
+### Pending Actions
+- **Rebuild Extension**: Run `maturin develop --features python-bindings` to compile the new Rust code.
+- **Switch Switch**: Update `client.py` to delegate `request_bars` to the Rust backend after build.
 
 ---
 

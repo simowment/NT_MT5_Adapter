@@ -14,15 +14,15 @@ from pathlib import Path
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig
+from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig  # type: ignore
 from nautilus_trader.common.component import LiveClock
 from nautilus_trader.config import LoggingConfig, RiskEngineConfig
 from datetime import datetime, timedelta, timezone
 from nautilus_trader.model.currencies import USD
-from nautilus_trader.model.data import Bar, BarType
+from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import AccountType, OmsType
 from nautilus_trader.model.identifiers import InstrumentId, Symbol
-from nautilus_trader.model.objects import Money, Price, Quantity
+from nautilus_trader.model.objects import Money
 
 from nautilus_mt5 import Mt5Config, Mt5HttpClient
 from nautilus_mt5.client import Mt5Client
@@ -86,31 +86,34 @@ async def fetch_and_run():
         traceback.print_exc()
         return
 
-    # 3. Fetch Data
+    # 3. Fetch Data using request_bars (returns Nautilus Bar objects directly)
     print("3. Fetching Historical Data...")
 
-    # Use the high-level client to fetch bars
-    # It abstracts away the JSON list/dict mess
+    # Define bar type first
+    bar_type = BarType.from_str(f"{instrument_id}-1-MINUTE-MID-EXTERNAL")
+
     try:
-        print("   Requesting bars via Mt5Client with range (pagination test)...")
+        print("   Requesting bars via Mt5Client.request_bars (Nautilus pattern)...")
 
         end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(
-            days=30
-        )  # 30 days of data to trigger pagination if limit is small
+        start_time = end_time - timedelta(days=30)  # 30 days of data
 
-        raw_bars = await mt5_client.fetch_bars(
-            symbol=symbol_str, timeframe="M1", start_time=start_time, end_time=end_time
+        # Use request_bars which returns list[Bar] directly
+        nautilus_bars = await mt5_client.request_bars(
+            bar_type=bar_type,
+            instrument=instrument,
+            start=start_time,
+            end=end_time,
         )
 
-        if not raw_bars:
+        if not nautilus_bars:
             print("No bars received.")
             return
 
-        print(f"Received {len(raw_bars)} bars")
-        if len(raw_bars) > 0:
-            print(f"First bar: {raw_bars[0]}")
-            print(f"Last bar: {raw_bars[-1]}")
+        print(f"Received {len(nautilus_bars)} Nautilus Bar objects")
+        if len(nautilus_bars) > 0:
+            print(f"First bar: {nautilus_bars[0]}")
+            print(f"Last bar: {nautilus_bars[-1]}")
 
     except Exception as e:
         print(f"Error fetching bars: {e}")
@@ -118,41 +121,6 @@ async def fetch_and_run():
 
         traceback.print_exc()
         return
-
-    # 4. Convert to Nautilus Bars
-    print("4. Converting to Nautilus Bar objects...")
-
-    bar_type = BarType.from_str(f"{instrument_id}-1-MINUTE-MID-EXTERNAL")
-    nautilus_bars = []
-
-    tf_seconds = 60  # M1
-
-    for b in raw_bars:
-        # b is now a nice dict
-        ts_open = b.get("time")
-        if ts_open is None:
-            continue
-
-        ts_close = ts_open + tf_seconds
-        ts_init_ns = ts_close * 1_000_000_000
-
-        # Use instrument's precisions for proper alignment
-        price_prec = instrument.price_precision
-        size_prec = instrument.size_precision
-
-        tick_vol = b.get("tick_volume", 0)
-
-        bar = Bar(
-            bar_type=bar_type,
-            open=Price(float(b["open"]), price_prec),
-            high=Price(float(b["high"]), price_prec),
-            low=Price(float(b["low"]), price_prec),
-            close=Price(float(b["close"]), price_prec),
-            volume=Quantity(float(tick_vol), size_prec),
-            ts_event=ts_init_ns,
-            ts_init=ts_init_ns,
-        )
-        nautilus_bars.append(bar)
 
     print(f"Created {len(nautilus_bars)} Bar objects.")
 
@@ -175,7 +143,7 @@ async def fetch_and_run():
     )
 
     engine.add_instrument(instrument)
-    engine.add_data(nautilus_bars)
+    engine.add_data(nautilus_bars)  # type: ignore[arg-type]  # list[Bar] is safely assignable to list[Data] here
 
     config = EMACrossConfig(
         instrument_id=instrument.id,
@@ -198,6 +166,8 @@ async def fetch_and_run():
     print("   FILLS")
     print("=" * 30)
     print(engine.trader.generate_order_fills_report())
+
+    print(engine.portfolio.analyzer.get_performance_stats_general())  # type: ignore
 
 
 if __name__ == "__main__":
