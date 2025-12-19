@@ -43,14 +43,14 @@ _nautilus_mt5 = None
 
 # 1. Try importing as standard module (if installed correctly)
 try:
-    import nautilus_mt5 as _nautilus_mt5
+    # Try relative import first (within the package)
+    from . import nautilus_mt5 as _nautilus_mt5
 
-    # Check if it is the package itself (circular import detection)
-    if hasattr(_nautilus_mt5, "__path__") and not hasattr(_nautilus_mt5, "Mt5Config"):
-        # It's the package code (not the extension), ignore it
+    # Check if we got the extension, not the package
+    if not hasattr(_nautilus_mt5, "Mt5Config"):
         _nautilus_mt5 = None
-except ImportError:
-    pass
+except (ImportError, ValueError):
+    _nautilus_mt5 = None
 
 # 2. If not found, look for extension files in likely locations
 if _nautilus_mt5 is None:

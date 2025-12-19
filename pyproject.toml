@@ -34,13 +34,12 @@ manifest-path = "crates/adapters/mt5/Cargo.toml"
 module-name = "nautilus_mt5"
 python-source = "python"
 
-# Include the Python adapter package
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["nautilus_mt5_adapter*"]
+where = ["python"]
+include = ["nautilus_mt5*"]
 
 # Pyright configuration
 [tool.pyright]
-include = ["nautilus_mt5_adapter", "python"]
+include = ["python"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"

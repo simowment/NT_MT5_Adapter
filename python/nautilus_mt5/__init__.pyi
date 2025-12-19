@@ -7,7 +7,17 @@ __all__: list[str]
 
 class Mt5Config:
     """MT5 HTTP client configuration."""
-    def __init__(self) -> None: ...
+
+    base_url: str
+    http_timeout: int
+    proxy: str | None
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        http_timeout: int | None = None,
+        proxy: str | None = None,
+    ) -> None: ...
 
 class Mt5Credential:
     """MT5 credentials for authentication."""

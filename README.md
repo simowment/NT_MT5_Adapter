@@ -2,7 +2,7 @@
 
 A high-performance **MetaTrader 5 (MT5)** adapter for **NautilusTrader**.
 
-This adapter connects NautilusTrader to MT5 via a lightweight **Open Source REST Middleware** (Python-based), enabling both **Live Trading** and **Data Acquisition**.
+This adapter connects NautilusTrader to MT5 via a lightweight **Open Source REST Middleware** (Python-based), enabling both **Live Trading** and **Data Acquisition**. It leverages **Rust** for performance-critical data handling and JSON parsing.
 
 ---
 
@@ -25,12 +25,14 @@ MetaTrader 5 does not support REST/WebSockets natively. You must run the middlew
 ## ⚡ Features
 
 ### 1. Robust Data Fetching
-*   **Automatic Pagination**: Request unlimited historical data. The adapter automatically chunks requests (e.g., 30 days for M1 bars, 6 hours for Ticks) to bypass HTTP and API limits.
+*   **Rust Core Acceleration**: Historical bar fetching is implemented in Rust for high-performance pagination and parsing.
+*   **Automatic Pagination**: Request unlimited historical data. The adapter automatically chunks requests (e.g., 30 days for M1 bars, 6 hours for Ticks).
 *   **Gap Handling**: Gracefully handles market closures and missing data.
-*   **Correct Instrument Mapping**: Automatically detects **Forex** vs **CFDs** (Indices, Crypto, Stocks) based on instrument path.
+*   **Correct Instrument Mapping**: Automatically detects **Forex** vs **CFDs** (Indices, Crypto, Stocks).
 
 ### 2. Live Order Execution
-*   **Netting Mode**: Designed for Netting accounts (standard for algo trading).
+*   **Netting Mode**: Optimized for Netting accounts (standard for algorithmic trading).
+*   **Real-time Lifecycle**: Full support for order lifecycle events (Submitted, Accepted, Rejected, Filled).
 *   **Advanced Order Tags**: Support for Stop Loss and Take Profit via Nautilus tags.
     ```python
     # Example: Send Market Buy with SL/TP
@@ -46,7 +48,7 @@ MetaTrader 5 does not support REST/WebSockets natively. You must run the middlew
 
 ## 🛠️ Installation & Building
 
-This adapter uses **Rust** for performance handling of JSON and HTTP.
+This adapter uses a mixed **Python/Rust** architecture.
 
 1.  **Install dependencies**:
     ```bash
@@ -64,20 +66,26 @@ This adapter uses **Rust** for performance handling of JSON and HTTP.
 
 We provide a comprehensive test suite to verify connectivity and logic.
 
-### 1. Basic Connection Test
-Verifies that the adapter can talk to the MT5 Middleware.
-```bash
-python tests/test_bindings.py
-```
-
-### 2. Backtest Data Test (Pagination Check)
-Fetches a large range of historical data (e.g., 30 days of M1 bars) to verify pagination logic.
+### 1. Backtest Data Test (Pagination Check)
+Fetches historical data and runs a sample EMACross strategy to verify the full pipeline.
 ```bash
 python tests/test_backtest.py
 ```
 
-### 3. Live Trading Test
-Places a real order (Demo recommended!) to verify execution logic.
+### 2. Data Streaming Test
+Verifies that quote and trade ticks are correctly received via long-polling.
+```bash
+python tests/test_data.py
+```
+
+### 3. Live Order Test
+Tests order placement, modification, and cancellation (Demo account recommended!).
+```bash
+python tests/test_live_orders.py
+```
+
+### 4. Live Strategy Test
+Runs a simple periodic market order strategy.
 ```bash
 python tests/test_live_strategy.py
 ```
@@ -95,7 +103,6 @@ from nautilus_mt5 import Mt5DataClientConfig, Mt5ExecClientConfig, Mt5Instrument
 provider_config = Mt5InstrumentProviderConfig(
     base_url="http://localhost:5000",
     filter_cfds=True,                # Include Indices/Crypto
-    filter_currencies=("EUR", "USD") # Optional filter
 )
 
 data_config = Mt5DataClientConfig(
@@ -112,6 +119,11 @@ exec_config = Mt5ExecClientConfig(
 
 ## 🔍 Known Limitations
 
-1.  **Speed**: Fetching millions of M1 bars takes time (HTTP overhead). Use local caching for backtests after the first download.
-2.  **Ticks**: Tick data is heavy. Requesting large tick ranges will be slow; use M1 bars where possible.
-3.  **Account Type**: Currently optimized for **Netting** accounts. Hedging accounts may cause position tracking desyncs.
+1.  **Account Type**: Currently optimized for **Netting** accounts. Hedging accounts are functional but may cause position tracking intricacies in complex scenarios.
+2.  **HTTP Overhead**: Fetching millions of M1 bars is subject to HTTP latency. Use local caching (Nautilus standard `Cache`) for repeated backtests.
+3.  **Order Matching**: Order modification and cancellation are supported but depend on the broker's MT5 execution rules.
+
+---
+
+## 📜 License
+Licensed under the GNU Lesser General Public License Version 3.0 (LGPL-3.0).
